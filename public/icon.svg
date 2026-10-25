@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#07070a" />
+      <stop offset="100%" stop-color="#12121e" />
+    </linearGradient>
+    <linearGradient id="flameGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e11d48" />
+      <stop offset="50%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <rect width="504" height="504" x="4" y="4" rx="108" fill="none" stroke="rgba(244, 63, 94, 0.3)" stroke-width="8" />
+
+  <!-- Flame Icon -->
+  <g transform="translate(106, 60) scale(1.2)">
+    <path d="M125 0 C125 0 135 45 105 85 C80 118 45 140 45 185 C45 240 85 270 125 270 C165 270 205 240 205 185 C205 155 190 125 180 100 C165 140 135 155 125 155 C110 155 95 142 95 125 C95 90 125 0 125 0 Z" fill="url(#flameGrad)" />
+  </g>
+
+  <!-- Typography JOBS -->
+  <text x="256" y="420" font-family="system-ui, -apple-system, sans-serif" font-size="78" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="4">JOBS</text>
+  <rect x="360" y="360" width="54" height="28" rx="6" fill="#e11d48" />
+  <text x="387" y="380" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="800" fill="#ffffff" text-anchor="middle">18+</text>
+</svg>

@@ -1,0 +1,6 @@
+{
+  "name": "Jhobs - Namoro & Conteúdo VIP 18+",
+  "description": "App de namoro e encontros para maiores de 18 anos com desbloqueio de conteúdo exclusivo e sistema de créditos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,5 @@
+{
+  "summary":  "Relatório completo da implementação progressiva de proteção de fotos e vídeos no JOBS, cobrindo o diagnóstico da arquitetura (Fase 0), proteção de backend e autorização com prevenção a IDOR e tokens efêmeros (Fase 1), proteção nativa Android via FLAG_SECURE (Fase 2), marca-d'água dissuasória com rastreamento forense não sensível e escudo anti-cópia (Fase 3), testes de integração e regressão (Fase 4) e matriz de evidências verificáveis com status formal para cada fase.",
+  "updatedAt":  "2026-10-24T14:29:10.463890289Z",
+  "userFacing":  true
+}

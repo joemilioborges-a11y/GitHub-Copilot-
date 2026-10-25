@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- JOBS Flame Symbol with Pink to Orange Gradient (Safe margin > 25%) -->
+    <path
+        android:pathData="M 54,28 C 56.5,36.5 61,42.5 68.5,46.5 C 74.5,49.5 77,56 77,62.5 C 77,72.5 67.5,80 54,80 C 40.5,80 31,72.5 31,62.5 C 31,52 38,44.5 43.5,39.5 C 46.5,44 51,46.5 55.5,46.5 C 51,39.5 52.8,33.5 54,28 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="31"
+                android:startY="80"
+                android:endX="77"
+                android:endY="28"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#E11D48" />
+                <item android:offset="0.35" android:color="#F43F5E" />
+                <item android:offset="0.70" android:color="#FB7185" />
+                <item android:offset="1.0" android:color="#FB923C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner Core Flame Warm Sheen -->
+    <path
+        android:pathData="M 54,38 C 55.5,43 58.5,47 63.5,49.5 C 68,51.5 70.5,56 70.5,61.5 C 70.5,68.5 63,75 54,75 C 45,75 37.5,68.5 37.5,61.5 C 37.5,54.5 43,48 47,45 C 49,47.5 52,49.5 55.5,49.5 C 53,44 53,40.5 54,38 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="75"
+                android:endX="54"
+                android:endY="38"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#BFFDA4AF" />
+                <item android:offset="0.6" android:color="#66FED7AA" />
+                <item android:offset="1.0" android:color="#1AFFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner White Heart centered inside lower flame body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,58.8 C 52.8,55.8 47.5,54.2 44.8,57.5 C 41.8,61.2 43.8,66.5 54,73.5 C 64.2,66.5 66.2,61.2 63.2,57.5 C 60.5,54.2 55.2,55.8 54,58.8 Z" />
+</vector>

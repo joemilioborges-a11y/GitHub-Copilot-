@@ -1,0 +1,307 @@
+/**
+ * Script de Execução Automatizada da Suíte de Testes (Lives & Ledger)
+ * Pode ser executado no Node via tsx: `npx tsx scripts/runVerificationTests.ts`
+ */
+
+// Polyfill in-memory localStorage se executado no ambiente Node.js
+if (typeof globalThis.localStorage === 'undefined') {
+  const store: Record<string, string> = {};
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => (key in store ? store[key] : null),
+    setItem: (key: string, value: string) => {
+      store[key] = String(value);
+    },
+    removeItem: (key: string) => {
+      delete store[key];
+    },
+    clear: () => {
+      for (const k in store) delete store[k];
+    },
+    key: (index: number) => Object.keys(store)[index] || null,
+    get length() {
+      return Object.keys(store).length;
+    },
+  };
+}
+
+async function main() {
+  console.log('========================================================================');
+  console.log('JOBS 1.0 — EXECUÇÃO DE TESTES DE INTEGRAÇÃO & AUDITORIA TÉCNICA');
+  console.log('Módulos: Lives ao Vivo (Fase 1) & Livro-Razão Contábil (Audit Ledger)');
+  console.log('========================================================================\n');
+
+  // Importação dinâmica após inicialização do polyfill
+  const { runLiveAndAuditVerificationSuite } = await import('../src/utils/liveAndAuditVerificationTests');
+
+  const summary = await runLiveAndAuditVerificationSuite();
+
+  console.log(`Timestamp: ${summary.timestamp}`);
+  console.log(`Duração Total: ${summary.executionDurationMs}ms\n`);
+
+  let currentCategory = '';
+  for (const t of summary.results) {
+    if (t.category !== currentCategory) {
+      currentCategory = t.category;
+      console.log(`\n--- [${currentCategory}] ---`);
+    }
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} ${t.id} - ${t.name} (${t.durationMs}ms)`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES DE REGRESSÃO: SIMULADOR DE MONETIZAÇÃO E SAQUES');
+  console.log('========================================================================\n');
+
+  const { runAllWithdrawalSimulatorTests } = await import('../src/utils/withdrawalSimulatorTests');
+  const withdrawalSummary = runAllWithdrawalSimulatorTests();
+
+  for (const t of withdrawalSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber}: ${t.name}`);
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: ATOMICIDADE FINANCEIRA & INTEGRAÇÃO DE PAYOUT');
+  console.log('========================================================================\n');
+
+  const { runAtomicPayoutTestSuite } = await import('../src/services/__tests__/ledgerServiceAtomicPayout.test');
+  const atomicSummary = await runAtomicPayoutTestSuite();
+
+  for (const t of atomicSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber}: ${t.name} (${t.durationMs}ms)`);
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: HOOK USELIVESTREAMVIEW & SALA DE TRANSMISSÃO');
+  console.log('========================================================================\n');
+
+  const { runLiveStreamViewHookTestSuite } = await import('../src/utils/liveStreamViewHookTests');
+  const hookSummary = await runLiveStreamViewHookTestSuite();
+
+  for (const t of hookSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    if (!t.passed && t.message) {
+      console.log(`    ERRO DETALHADO: ${t.message}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS-LEDGER-AUDIT-002: TESTES OBRIGATÓRIOS DE DESBLOQUEIO E IDEMPOTÊNCIA');
+  console.log('========================================================================\n');
+
+  const { runContentUnlockAuditTestSuite } = await import('../src/services/__tests__/ledgerContentUnlockAudit.test');
+  const contentUnlockSummary = await runContentUnlockAuditTestSuite();
+
+  for (const t of contentUnlockSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Cenário ${t.scenarioNumber}: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: GIFT ANIMATION OVERLAY (SALA DE TRANSMISSÃO)');
+  console.log('========================================================================\n');
+
+  const { runGiftAnimationOverlayTestSuite } = await import('../src/utils/giftAnimationOverlayTests');
+  const giftOverlaySummary = await runGiftAnimationOverlayTestSuite();
+
+  for (const t of giftOverlaySummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    if (t.message) {
+      console.log(`    DETALHE: ${t.message}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: FEEDBACK VISUAL EM TEMPO REAL NO LIVESTREAM');
+  console.log('========================================================================\n');
+
+  const { runLiveFeedbackTestSuite } = await import('../src/utils/liveFeedbackTests');
+  const feedbackSummary = await runLiveFeedbackTestSuite();
+
+  for (const t of feedbackSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    if (t.message) {
+      console.log(`    DETALHE: ${t.message}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: AUDITORIA DE DESBLOQUEIOS DE LIVES (70/30)');
+  console.log('========================================================================\n');
+
+  const { runLiveUnlockAuditTestSuite } = await import('../src/utils/liveUnlockAuditTests');
+  const auditSummary = await runLiveUnlockAuditTestSuite();
+
+  for (const t of auditSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Cenário ${t.scenarioNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: PLANO TÉCNICO DE EVOLUÇÃO (11 FASES)');
+  console.log('========================================================================\n');
+
+  const { runEvolutionRoadmapTestSuite } = await import('../src/services/__tests__/evolutionRoadmapService.test');
+  const evolutionSummary = await runEvolutionRoadmapTestSuite();
+
+  for (const t of evolutionSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber}: ${t.name} (${t.durationMs}ms)`);
+    if (!t.passed && t.message) {
+      console.log(`    ERRO DETALHADO: ${t.message}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: INTERESSE MÚTUO E MENSAGERIA 1:1 ENTRE CONTAS REAIS');
+  console.log('========================================================================\n');
+
+  const { runMatchAndMessagingTestSuite } = await import('../src/services/__tests__/matchAndMessagingService.test');
+  const matchMsgSummary = await runMatchAndMessagingTestSuite();
+
+  for (const t of matchMsgSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber}: ${t.name} (${t.durationMs}ms)`);
+    if (!t.passed && t.message) {
+      console.log(`    ERRO DETALHADO: ${t.message}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: MÓDULO FINANCEIRO EXECUTIVO & RANKINGS');
+  console.log('========================================================================\n');
+
+  const { runExecutiveFinancialRankingTests } = await import('../src/utils/executiveFinancialRankingTests');
+  const execFinancialSummary = await runExecutiveFinancialRankingTests();
+
+  for (const t of execFinancialSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} ${t.id}: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — FASE 1: 30 TESTES OBRIGATÓRIOS (CARTEIRA, PACOTES & DESBLOQUEIO)');
+  console.log('========================================================================\n');
+
+  const { monetizationService } = await import('../src/services/monetizationService');
+  const monetizationSuite = await monetizationService.runComprehensiveTestSuite();
+
+  for (const t of monetizationSuite.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.id} [${t.category}]: ${t.name} (${t.durationMs}ms)`);
+    if (!t.passed && t.message) {
+      console.log(`    ERRO DETALHADO: ${t.message}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: PROTEÇÃO DE MÍDIAS, FOTOS & VÍDEOS (FASE 1 & 2)');
+  console.log('========================================================================\n');
+
+  const { runProtectedMediaTestSuite } = await import('../src/services/__tests__/protectedMediaService.test');
+  const mediaSecuritySummary = await runProtectedMediaTestSuite();
+
+  for (const t of mediaSecuritySummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: LOG DE ATIVIDADES DO ADMINISTRADOR (SHA-256)');
+  console.log('========================================================================\n');
+
+  const { runAdminAuditTestSuite } = await import('../src/services/__tests__/adminAuditService.test');
+  const adminAuditSummary = await runAdminAuditTestSuite();
+
+  for (const t of adminAuditSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  const grandTotal =
+    summary.totalTests +
+    withdrawalSummary.total +
+    atomicSummary.total +
+    hookSummary.total +
+    contentUnlockSummary.total +
+    giftOverlaySummary.total +
+    feedbackSummary.total +
+    auditSummary.total +
+    evolutionSummary.total +
+    matchMsgSummary.total +
+    execFinancialSummary.total +
+    monetizationSuite.totalTests +
+    mediaSecuritySummary.total +
+    adminAuditSummary.total;
+  const grandPassed =
+    summary.passedCount +
+    withdrawalSummary.passed +
+    atomicSummary.passed +
+    hookSummary.passed +
+    contentUnlockSummary.passed +
+    giftOverlaySummary.passed +
+    feedbackSummary.passed +
+    auditSummary.passed +
+    evolutionSummary.passed +
+    matchMsgSummary.passed +
+    execFinancialSummary.passed +
+    monetizationSuite.passedTests +
+    mediaSecuritySummary.passed +
+    adminAuditSummary.passed;
+  const grandFailed =
+    summary.failedCount +
+    withdrawalSummary.failed +
+    atomicSummary.failed +
+    hookSummary.failed +
+    contentUnlockSummary.failed +
+    giftOverlaySummary.failed +
+    feedbackSummary.failed +
+    auditSummary.failed +
+    evolutionSummary.failed +
+    matchMsgSummary.failed +
+    execFinancialSummary.failed +
+    (monetizationSuite.totalTests - monetizationSuite.passedTests) +
+    mediaSecuritySummary.failed +
+    adminAuditSummary.failed;
+
+  console.log('\n========================================================================');
+  console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
+  console.log(`Total de Casos de Teste: ${grandTotal}`);
+  console.log(`Aprovados:              ${grandPassed} (${((grandPassed / grandTotal) * 100).toFixed(1)}%)`);
+  console.log(`Falhas:                 ${grandFailed}`);
+  console.log(`Tempo Total:            ${summary.executionDurationMs + contentUnlockSummary.executionDurationMs + auditSummary.durationMs + execFinancialSummary.durationMs}ms`);
+  console.log('========================================================================\n');
+
+  if (grandFailed > 0) {
+    process.exit(1);
+  }
+}
+
+main().catch((err) => {
+  console.error('Falha fatal na execução dos testes:', err);
+  process.exit(1);
+});

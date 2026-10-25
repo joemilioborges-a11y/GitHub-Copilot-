@@ -1,0 +1,5 @@
+{
+  "summary":  "Relatório Executivo de Implementação do Painel Central do Administrador no JOBS. Documenta a integração completa dos 12 módulos de navegação canônicos, 19 indicadores em tempo real, sub-abas especializadas (Rateio 70/30, Auditoria Criptográfica SHA-256 do Livro-Razão, Monitoramento de Lives e Roadmap de Evolução das Fases 0 a 10), além da aprovação integral dos 144 testes automatizados em ambiente sandbox auditado.",
+  "updatedAt":  "2026-10-23T17:27:44.121605478Z",
+  "userFacing":  true
+}

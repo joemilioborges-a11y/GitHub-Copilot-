@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #09090d;
+    color: #f3f4f6;
+    overflow-x: hidden;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  h1, h2, h3, h4, .font-display {
+    font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  }
+}
+
+/* Custom Scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0d14;
+}
+::-webkit-scrollbar-thumb {
+  background: #272736;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f5a;
+}
+
+/* Shimmer & Scanning Animations for Filters and Discovery */
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes scan-radar {
+  0% {
+    top: 5%;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    top: 95%;
+    opacity: 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer-sweep 1.4s ease-in-out infinite;
+}
+
+.animate-scan-radar {
+  animation: scan-radar 1.6s ease-in-out infinite;
+}
+
+@keyframes float-up {
+  0% {
+    transform: translateY(0) scale(0.8);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-80px) scale(1.15) rotate(-6deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-160px) scale(1) rotate(6deg);
+    opacity: 0;
+  }
+}
+
+.animate-float-up {
+  animation: float-up 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}

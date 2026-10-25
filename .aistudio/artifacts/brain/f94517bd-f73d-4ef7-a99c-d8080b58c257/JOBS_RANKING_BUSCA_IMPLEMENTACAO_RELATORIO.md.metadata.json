@@ -1,0 +1,5 @@
+{
+  "summary":  "Relatório técnico de auditoria e implementação incremental do sistema de busca no Ranking Financeiro de Criadores do JOBS, cobrindo filtros por nome de usuário e ID, normalização de espaços, integridade contábil, imutabilidade do livro-razão e internacionalização (i18n).",
+  "updatedAt":  "2026-10-24T14:59:08.937843611Z",
+  "userFacing":  true
+}

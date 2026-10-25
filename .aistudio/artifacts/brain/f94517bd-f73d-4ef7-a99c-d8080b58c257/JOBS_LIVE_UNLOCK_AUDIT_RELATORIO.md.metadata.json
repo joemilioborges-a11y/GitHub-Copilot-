@@ -1,0 +1,5 @@
+{
+  "summary":  "Relatório Técnico Executivo da Implementação do Painel de Auditoria Financeira em Tempo Real (LiveUnlockAuditPanel) com conciliação contábil do rateio 70/30 para transmissões ao vivo e conteúdos pagos no ecossistema JOBS. Inclui arquitetura de partidas dobradas no livro-razão imutável (financialLedger), prova matemática, subscrição reativa sem vazamento de memória, proteção contra CSV Formula Injection e evidência dos 12 testes automatizados com 100% de aprovação.",
+  "updatedAt":  "2026-10-22T15:43:02.013257984Z",
+  "userFacing":  true
+}

@@ -1,0 +1,5 @@
+{
+  "summary":  "Relatório completo de auditoria técnica do ledgerService.ts e dos módulos de desbloqueio de conteúdo no projeto JOBS, compreendendo mapeamento de rotas, análise das 6 dimensões de idempotência, consistência financeira e reconciliação, resultados de testes automatizados com evidências verificáveis, matriz de achados e respostas aos questionamentos de homologação.",
+  "updatedAt":  "2026-10-24T13:33:22.926196295Z",
+  "userFacing":  true
+}

@@ -1,0 +1,5 @@
+{
+  "summary":  "Mapeamento técnico e auditoria de engenharia do LiveStreamView no JOBS: arquitetura de vídeo (Simulador DOM com captura local getUserMedia), fluxo de sinalização, catálogo de endpoints de backend existentes vs propostos, diagrama de sequência, lacunas de segurança/DRM e plano de migração incremental para WebRTC SFU e LL-HLS.",
+  "updatedAt":  "2026-10-22T00:40:03.504659417Z",
+  "userFacing":  true
+}
