@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Profile, UserProfileData, UserSubscription } from '../../types';
 import { calculateAiCompatibility } from '../../utils/aiMatchmaking';
+import { MonthlyRecognitionPublicSection } from '../MonthlyRecognitionPublicSection';
 
 interface Screen08HomeDashboardProps {
   userProfile: UserProfileData;
@@ -177,6 +178,14 @@ export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Seção Pública Oficial: Garoto JOBS e Garota JOBS */}
+      <MonthlyRecognitionPublicSection
+        onSelectCreatorProfile={(creatorId) => {
+          const found = profiles.find((p) => p.id === creatorId);
+          if (found) onSelectProfile(found);
+        }}
+      />
 
       {/* Destaques Recomendados pela IA */}
       <div>

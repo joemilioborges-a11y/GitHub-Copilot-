@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -22,6 +22,9 @@ import {
   AlertCircle,
   ExternalLink,
   SlidersHorizontal,
+  Cloud,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
 import {
   adminAuditService,
@@ -30,6 +33,13 @@ import {
   AdminActionResult,
   ChainVerificationResult,
 } from '../../services/adminAuditService';
+import {
+  signInWithGoogle,
+  signOutFirebase,
+  subscribeToAuthChanges,
+  syncAdminAuditEventToFirestore,
+  subscribeToCloudAuditLogs,
+} from '../../firebase';
 
 interface AdminActivityLogProps {
   onRefreshParent?: () => void;
@@ -88,6 +98,86 @@ export const AdminActivityLog: React.FC<AdminActivityLogProps> = ({ onRefreshPar
         showToast(`ALERTA: Violação detectada no evento ${result.brokenEventId}!`, 'error');
       }
     }, 400);
+  };
+
+  // Firebase Cloud Auth & Firestore Sync State
+  const [firebaseUserEmail, setFirebaseUserEmail] = useState<string | null>(null);
+  const [firebaseUserUid, setFirebaseUserUid] = useState<string | null>(null);
+  const [cloudRecordCount, setCloudRecordCount] = useState<number>(0);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubAuth = subscribeToAuthChanges((user) => {
+      setFirebaseUserEmail(user?.email ?? null);
+      setFirebaseUserUid(user?.uid ?? null);
+    });
+    return () => unsubAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseUserUid) {
+      setCloudRecordCount(0);
+      return;
+    }
+    const unsubLogs = subscribeToCloudAuditLogs(
+      (records) => {
+        setCloudRecordCount(records.length);
+      },
+      () => {
+        // Non-admin or unverified accounts will gracefully skip listing
+      }
+    );
+    return () => unsubLogs();
+  }, [firebaseUserUid]);
+
+  const handleFirebaseSignIn = async () => {
+    try {
+      const user = await signInWithGoogle();
+      showToast(`Autenticado no Firebase: ${user.email || user.uid}`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Falha na autenticação Firebase.', 'error');
+    }
+  };
+
+  const handleFirebaseSignOut = async () => {
+    try {
+      await signOutFirebase();
+      showToast('Sessão Firebase encerrada.', 'info');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Erro ao encerrar sessão.', 'error');
+    }
+  };
+
+  const handleSyncLatestToFirestore = async () => {
+    if (!firebaseUserUid) {
+      showToast('Autentique-se com Google Admin para sincronizar com o Cloud Firestore.', 'error');
+      return;
+    }
+    setIsSyncingCloud(true);
+    try {
+      const chain = adminAuditService.getEventsChain();
+      const latest = chain[chain.length - 1];
+      if (latest) {
+        await syncAdminAuditEventToFirestore({
+          eventId: latest.eventId,
+          action: latest.action,
+          targetType: latest.targetType,
+          targetId: latest.targetId,
+          result: latest.result,
+          reason: latest.reason,
+          eventHash: latest.eventHash,
+          previousEventHash: latest.previousEventHash,
+        });
+        showToast(`Bloco HEAD (${latest.eventId}) ancorado no Cloud Firestore (us-west2).`, 'success');
+      }
+    } catch (err) {
+      showToast(
+        err instanceof Error ? `Erro Firestore: ${err.message.slice(0, 120)}` : 'Erro ao sincronizar no Firestore.',
+        'error'
+      );
+    } finally {
+      setIsSyncingCloud(false);
+    }
   };
 
   // Lista de atores disponíveis para o select de filtro
@@ -289,6 +379,71 @@ export const AdminActivityLog: React.FC<AdminActivityLogProps> = ({ onRefreshPar
                 <span>{isVerifying ? 'Verificando...' : 'Verificar Cadeia'}</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* Barra de Ancoragem Remota Firebase Cloud Firestore (us-west2) */}
+        <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-sky-950/60 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0">
+              <Cloud className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-white">
+                  Cloud Firestore WORM Audit Anchor
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                  gen-lang-client-0491658347 • us-west2
+                </span>
+                {firebaseUserEmail ? (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                    Autenticado: {firebaseUserEmail} ({cloudRecordCount} blocos em nuvem)
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    Modo Local (Login Google requerido para ancoragem Cloud)
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Regras de segurança Firestore ativas: coleção <code className="text-slate-300">/admin_audit_logs</code> estritamente append-only (<code className="text-slate-300">allow update, delete: if false</code>).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {firebaseUserUid ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleSyncLatestToFirestore}
+                  disabled={isSyncingCloud}
+                  className="px-3 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 rounded-xl text-xs font-semibold text-sky-200 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Cloud className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-bounce' : ''}`} />
+                  <span>{isSyncingCloud ? 'Ancorando...' : 'Ancorar HEAD no Firestore'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFirebaseSignOut}
+                  className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-300 transition-all cursor-pointer flex items-center gap-1"
+                  title="Sair do Firebase Auth"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sair</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleFirebaseSignIn}
+                className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-sky-950/50"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Conectar Google Admin (Firebase)</span>
+              </button>
+            )}
           </div>
         </div>
 

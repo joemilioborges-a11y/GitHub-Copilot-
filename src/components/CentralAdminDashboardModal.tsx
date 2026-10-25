@@ -53,6 +53,8 @@ import { EvolutionRoadmapPanel } from './admin/EvolutionRoadmapPanel';
 import { CreatorEarningsRankingView } from './admin/CreatorEarningsRankingView';
 import { JobsCreatorStudio } from './admin/JobsCreatorStudio';
 import { AdminActivityLog } from './admin/AdminActivityLog';
+import { MonthlyRecognitionAdminPanel } from './admin/MonthlyRecognitionAdminPanel';
+import { VrSimulatorControlPanel } from './admin/VrSimulatorControlPanel';
 import { adminAuditService } from '../services/adminAuditService';
 
 interface CentralAdminDashboardModalProps {
@@ -71,7 +73,8 @@ export type AdminSection =
   | 'security'
   | 'reports_export'
   | 'evolution'
-  | 'settings';
+  | 'settings'
+  | 'vr_simulator';
 
 export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProps> = ({ onClose }) => {
   const [activeSection, setActiveSection] = useState<AdminSection>('overview');
@@ -83,7 +86,7 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
   // Sub-abas de visualização para integrar módulos especializados dentro dos 12 tópicos
   const [walletSubTab, setWalletSubTab] = useState<'ledger' | 'executive_financial'>('ledger');
   const [contentsSubTab, setContentsSubTab] = useState<'catalog' | 'live_audit'>('catalog');
-  const [creatorsSubTab, setCreatorsSubTab] = useState<'creators_ranking' | 'creator_studio' | 'creators_list' | 'live_monitoring'>('creators_ranking');
+  const [creatorsSubTab, setCreatorsSubTab] = useState<'creators_ranking' | 'monthly_recognition' | 'creator_studio' | 'creators_list' | 'live_monitoring'>('creators_ranking');
   const [securitySubTab, setSecuritySubTab] = useState<'admin_activity' | 'crypto_ledger' | 'events'>('admin_activity');
 
   // Estados reativos dos dados reais do serviço
@@ -330,6 +333,7 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
     { id: 'reports_export' as AdminSection, label: '10. Relatórios', icon: FileText },
     { id: 'evolution' as AdminSection, label: '11. Evolução do Projeto', icon: TrendingUp },
     { id: 'settings' as AdminSection, label: '12. Configurações Administrativas', icon: Settings },
+    { id: 'vr_simulator' as AdminSection, label: '13. Simulador VR (30 Dias)', icon: PlayCircle },
   ];
 
   return (
@@ -1354,6 +1358,18 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                   </button>
 
                   <button
+                    onClick={() => setCreatorsSubTab('monthly_recognition')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                      creatorsSubTab === 'monthly_recognition'
+                        ? 'bg-rose-600 text-white shadow-md shadow-rose-950/50'
+                        : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800'
+                    }`}
+                  >
+                    <Award className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Garoto & Garota JOBS (Mensal)</span>
+                  </button>
+
+                  <button
                     onClick={() => setCreatorsSubTab('creator_studio')}
                     className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                       creatorsSubTab === 'creator_studio'
@@ -1391,6 +1407,8 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
 
                 {creatorsSubTab === 'creators_ranking' ? (
                   <CreatorEarningsRankingView />
+                ) : creatorsSubTab === 'monthly_recognition' ? (
+                  <MonthlyRecognitionAdminPanel />
                 ) : creatorsSubTab === 'creator_studio' ? (
                   <JobsCreatorStudio />
                 ) : creatorsSubTab === 'live_monitoring' ? (
@@ -1809,6 +1827,11 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                 </div>
               </div>
             )}
+
+            {/* ============================================================== */}
+            {/* SEÇÃO 13: SIMULADOR DE REALIDADE VIRTUAL (CICLO DE 30 DIAS)     */}
+            {/* ============================================================== */}
+            {activeSection === 'vr_simulator' && <VrSimulatorControlPanel />}
           </main>
         </div>
       </div>

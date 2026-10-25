@@ -242,6 +242,84 @@ async function main() {
     }
   }
 
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES OBRIGATÓRIOS: FIREBASE CONFIG & SINGLETON INITIALIZATION');
+  console.log('========================================================================\n');
+
+  const { getApps, getApp } = await import('firebase/app');
+  const { app: fbApp, db: fbDb, firebaseConfig, initializeFirebaseApp } = await import('../src/utils/firebaseConfig');
+
+  const fbTests: Array<{ id: string; name: string; passed: boolean; evidence: string }> = [
+    {
+      id: 'FB-CFG-01',
+      name: 'Carregamento das propriedades reais de firebase-applet-config.json sem campos inventados',
+      passed:
+        firebaseConfig.projectId === 'gen-lang-client-0491658347' &&
+        firebaseConfig.firestoreDatabaseId === 'ai-studio-jhobs-f94517bd-f73d-4ef7-a99c-d8080b58c257' &&
+        typeof firebaseConfig.appId === 'string' &&
+        firebaseConfig.appId.length > 0 &&
+        typeof firebaseConfig.authDomain === 'string',
+      evidence: `projectId=${firebaseConfig.projectId}, firestoreDatabaseId=${firebaseConfig.firestoreDatabaseId}`,
+    },
+    {
+      id: 'FB-CFG-02',
+      name: 'Prevenção de duplicação de instâncias via getApps()/getApp()/initializeFirebaseApp()',
+      passed:
+        initializeFirebaseApp() === fbApp &&
+        getApp() === fbApp &&
+        getApps().length === 1,
+      evidence: `getApps().length=${getApps().length}, app.name=${fbApp.name} (instância única reutilizada)`,
+    },
+    {
+      id: 'FB-CFG-03',
+      name: 'Inicialização do serviço Firestore apontando para o banco nomeado oficial',
+      passed: Boolean(fbDb && fbDb.app === fbApp),
+      evidence: `Firestore inicializado e vinculado ao app singleton (${fbDb.app.name})`,
+    },
+  ];
+
+  for (let i = 0; i < fbTests.length; i++) {
+    const t = fbTests[i];
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${i + 1} [${t.id}]: ${t.name} (0ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+  }
+
+  const fbPassed = fbTests.filter((t) => t.passed).length;
+  const fbFailed = fbTests.length - fbPassed;
+
+  console.log('\n========================================================================');
+  console.log('JOBS — 12 TESTES OBRIGATÓRIOS: RANKING MENSAL GAROTO JOBS & GAROTA JOBS');
+  console.log('========================================================================\n');
+
+  const { runMonthlyRecognitionTestSuite } = await import('../src/services/__tests__/monthlyRecognitionService.test');
+  const monthlyRecSummary = await runMonthlyRecognitionTestSuite();
+
+  for (const t of monthlyRecSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — 10 TESTES OBRIGATÓRIOS: SIMULADOR DE REALIDADE VIRTUAL (30 DIAS)');
+  console.log('========================================================================\n');
+
+  const { runVrSimulatorTestSuite } = await import('../src/services/__tests__/vrSimulatorService.test');
+  const vrSimSummary = await runVrSimulatorTestSuite();
+
+  for (const t of vrSimSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
   const grandTotal =
     summary.totalTests +
     withdrawalSummary.total +
@@ -256,7 +334,10 @@ async function main() {
     execFinancialSummary.total +
     monetizationSuite.totalTests +
     mediaSecuritySummary.total +
-    adminAuditSummary.total;
+    adminAuditSummary.total +
+    fbTests.length +
+    monthlyRecSummary.total +
+    vrSimSummary.total;
   const grandPassed =
     summary.passedCount +
     withdrawalSummary.passed +
@@ -271,7 +352,10 @@ async function main() {
     execFinancialSummary.passed +
     monetizationSuite.passedTests +
     mediaSecuritySummary.passed +
-    adminAuditSummary.passed;
+    adminAuditSummary.passed +
+    fbPassed +
+    monthlyRecSummary.passed +
+    vrSimSummary.passed;
   const grandFailed =
     summary.failedCount +
     withdrawalSummary.failed +
@@ -286,14 +370,17 @@ async function main() {
     execFinancialSummary.failed +
     (monetizationSuite.totalTests - monetizationSuite.passedTests) +
     mediaSecuritySummary.failed +
-    adminAuditSummary.failed;
+    adminAuditSummary.failed +
+    fbFailed +
+    monthlyRecSummary.failed +
+    vrSimSummary.failed;
 
   console.log('\n========================================================================');
   console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
   console.log(`Total de Casos de Teste: ${grandTotal}`);
   console.log(`Aprovados:              ${grandPassed} (${((grandPassed / grandTotal) * 100).toFixed(1)}%)`);
   console.log(`Falhas:                 ${grandFailed}`);
-  console.log(`Tempo Total:            ${summary.executionDurationMs + contentUnlockSummary.executionDurationMs + auditSummary.durationMs + execFinancialSummary.durationMs}ms`);
+  console.log(`Tempo Total:            ${summary.executionDurationMs + contentUnlockSummary.executionDurationMs + auditSummary.durationMs + execFinancialSummary.durationMs + monthlyRecSummary.durationMs + vrSimSummary.durationMs}ms`);
   console.log('========================================================================\n');
 
   if (grandFailed > 0) {

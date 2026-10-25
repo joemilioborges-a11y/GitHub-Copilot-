@@ -36,6 +36,14 @@ import {
 import confetti from 'canvas-confetti';
 import { financialLedger } from '../services/ledgerService';
 import { liveStreamService } from '../services/liveStreamService';
+import {
+  monthlyRecognitionService,
+  CreatorDeclaredCategory,
+} from '../services/monthlyRecognitionService';
+import {
+  vrSimulatorService,
+  VR_FINANCIAL_SIMULATION_BADGE,
+} from '../services/vrSimulatorService';
 
 interface CreatorStudioModalProps {
   onClose: () => void;
@@ -81,7 +89,20 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
   onWithdrawPix,
   onPublishMedia,
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'sales' | 'goals' | 'lives_challenges' | 'upload' | 'withdraw'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'sales' | 'goals' | 'lives_challenges' | 'monthly_ranking' | 'upload' | 'withdraw'>('dashboard');
+  const [recognitionRefresh, setRecognitionRefresh] = useState(0);
+  const [appealText, setAppealText] = useState('');
+  const [appealFeedback, setAppealFeedback] = useState<string | null>(null);
+
+  const ownRecognitionView = useMemo(() => {
+    return monthlyRecognitionService.getCreatorStudioRecognitionView({
+      requesterId: 'current_user',
+      requesterRole: 'creator',
+      targetCreatorId: 'current_user',
+      cycleId: '2026-10',
+      environment: 'sandbox',
+    });
+  }, [recognitionRefresh, activeTab]);
 
   // Creator Balance & Financial Conversion (1 credit = R$ 0,10 net creator payout)
   const creditValueBrl = 0.10;
@@ -109,10 +130,15 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
   );
   const performanceRules = useMemo(() => liveStreamService.getPerformanceRules(), []);
 
+  const [vrSimSnapshot, setVrSimSnapshot] = useState(() =>
+    vrSimulatorService.getStateSnapshot()
+  );
+
   useEffect(() => {
-    if (activeTab === 'lives_challenges' || activeTab === 'dashboard') {
+    if (activeTab === 'lives_challenges' || activeTab === 'dashboard' || activeTab === 'withdraw') {
       setLiveSessions(liveStreamService.getLiveSessions());
       setCreatorLedgerSummary(financialLedger.getCreatorBalances('current_user'));
+      setVrSimSnapshot(vrSimulatorService.getStateSnapshot());
     }
   }, [activeTab]);
 
@@ -618,6 +644,18 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('monthly_ranking')}
+            className={`pb-3 px-3 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'monthly_ranking'
+                ? 'text-amber-400 border-b-2 border-amber-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Trophy className="w-3.5 h-3.5 text-amber-400" />
+            <span>Garoto & Garota JOBS</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('upload')}
             className={`pb-3 px-3 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'upload'
@@ -745,6 +783,82 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
                     <ArrowDownRight className="w-3.5 h-3.5" />
                     <span>Sacar R$</span>
                   </button>
+                </div>
+              </div>
+
+              {/* Resumo Auditável do Módulo Financeiro do Simulador (Isolado em Sandbox) */}
+              <div className="p-4 rounded-2xl bg-slate-950/90 border border-amber-500/40 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                        {VR_FINANCIAL_SIMULATION_BADGE}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold">
+                        Dia {vrSimSnapshot.currentDay}/{vrSimSnapshot.totalDays} • Split 70/30
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Indicadores financeiros segregados do sandbox (créditos virtuais vs. receita
+                      elegível de consumo, sem impacto no saldo real).
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400">
+                    Δ Reconciliação: R${' '}
+                    {(vrSimSnapshot.latestReconciliation.reconciliationDeltaCents / 100)
+                      .toFixed(2)
+                      .replace('.', ',')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Créditos Concedidos / Consumidos</div>
+                    <div className="font-mono font-bold text-amber-300 mt-0.5">
+                      R${' '}
+                      {(vrSimSnapshot.latestReconciliation.totalCreditsPurchasedCents / 100)
+                        .toFixed(2)
+                        .replace('.', ',')}{' '}
+                      /{' '}
+                      {(vrSimSnapshot.latestReconciliation.totalCreditsConsumedCents / 100)
+                        .toFixed(2)
+                        .replace('.', ',')}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Receita Líquida Consumo</div>
+                    <div className="font-mono font-bold text-emerald-400 mt-0.5">
+                      R${' '}
+                      {(vrSimSnapshot.latestReconciliation.netEligibleRevenueCents / 100)
+                        .toFixed(2)
+                        .replace('.', ',')}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Repasse Criadores (70%)</div>
+                    <div className="font-mono font-bold text-fuchsia-400 mt-0.5">
+                      R${' '}
+                      {(vrSimSnapshot.latestReconciliation.netCreatorShareCents / 100)
+                        .toFixed(2)
+                        .replace('.', ',')}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Obrigações Pendentes / Saques</div>
+                    <div className="font-mono font-bold text-cyan-300 mt-0.5">
+                      R${' '}
+                      {(vrSimSnapshot.latestReconciliation.pendingCreatorObligationsCents / 100)
+                        .toFixed(2)
+                        .replace('.', ',')}{' '}
+                      / R${' '}
+                      {(vrSimSnapshot.latestReconciliation.settledCreatorPayoutsCents / 100)
+                        .toFixed(2)
+                        .replace('.', ',')}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1634,6 +1748,166 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
                 <span>Confirmar Transferência PIX Instantânea</span>
               </button>
             </form>
+          )}
+
+          {/* TAB: GAROTO & GAROTA JOBS (RECONHECIMENTO MENSAL PRÓPRIO) */}
+          {activeTab === 'monthly_ranking' && (
+            <div className="space-y-4">
+              {appealFeedback && (
+                <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-xs text-emerald-200 font-semibold">
+                  {appealFeedback}
+                </div>
+              )}
+
+              <div className="p-4 rounded-2xl bg-[#161624] border border-amber-500/30 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-amber-400 font-semibold">
+                      Ciclo {ownRecognitionView.periodLabel} · Estado: {ownRecognitionView.cycleStatus === 'open_provisional' ? 'Classificação Provisória' : ownRecognitionView.cycleStatus}
+                    </div>
+                    <h3 className="text-base font-display font-bold text-white mt-0.5">
+                      Sua Posição no Programa Garoto & Garota JOBS
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Exibição exclusiva dos seus próprios indicadores (dados individuais de terceiros são restritos por privacidade).
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-display font-black text-amber-400">
+                      {ownRecognitionView.rankInCategory ? `#${ownRecognitionView.rankInCategory}` : 'Inelegível'}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      de {ownRecognitionView.totalEligibleInCategory} elegíveis na categoria
+                    </div>
+                  </div>
+                </div>
+
+                {/* Categoria Autodeclarada Inclusiva */}
+                <div className="pt-3 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-300 font-semibold">
+                    Categoria de Participação Autodeclarada:
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {(['garota_jobs', 'garoto_jobs', 'opted_out'] as CreatorDeclaredCategory[]).map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          monthlyRecognitionService.updateCreatorCategoryDeclaration({
+                            creatorId: 'current_user',
+                            newCategory: cat,
+                            actorId: 'current_user',
+                            actorRole: 'creator',
+                            reason: 'Atualização voluntária de categoria pelo criador no Creator Studio.',
+                          });
+                          setRecognitionRefresh((r) => r + 1);
+                          setAppealFeedback('Categoria de participação atualizada com sucesso!');
+                          setTimeout(() => setAppealFeedback(null), 3000);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                          ownRecognitionView.declaredCategory === cat
+                            ? 'bg-amber-500 text-slate-950 font-bold'
+                            : 'bg-slate-900 text-slate-300 border border-slate-700 hover:text-white'
+                        }`}
+                      >
+                        {cat === 'garota_jobs' ? 'Garota JOBS' : cat === 'garoto_jobs' ? 'Garoto JOBS' : 'Opt-out (Privado)'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Breakdown 50 / 30 / 20 */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="p-3.5 rounded-2xl bg-[#141420] border border-white/10 space-y-1">
+                  <div className="text-slate-400">Nota Econômica (Peso 50%)</div>
+                  <div className="text-xl font-mono font-extrabold text-emerald-400">
+                    {ownRecognitionView.scores.economicScore.toFixed(2)} / 100
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Líq. Elegível: R$ {ownRecognitionView.scores.netEligiblePlatformRevenueBrl.toFixed(2)} (Pendentes excluídos: R$ {ownRecognitionView.scores.excludedPendingBrl.toFixed(2)})
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-[#141420] border border-white/10 space-y-1">
+                  <div className="text-slate-400">Nota de Conteúdo (Peso 30%)</div>
+                  <div className="text-xl font-mono font-extrabold text-sky-400">
+                    {ownRecognitionView.scores.contentScore.toFixed(2)} / 100
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {ownRecognitionView.scores.cappedUploadsScoredCount} uploads válidos · {ownRecognitionView.scores.validActiveDaysCount} dias ativos
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-[#141420] border border-white/10 space-y-1">
+                  <div className="text-slate-400">Nota de Integridade (Peso 20%)</div>
+                  <div className="text-xl font-mono font-extrabold text-purple-300">
+                    {ownRecognitionView.scores.integrityScore.toFixed(2)} / 100
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Estornos: {ownRecognitionView.scores.confirmedRefundRatePct.toFixed(2)}% · KYC 18+ Verificado
+                  </div>
+                </div>
+              </div>
+
+              {/* Pontuação Combinada e Orientações */}
+              <div className="p-4 rounded-2xl bg-[#141420] border border-white/10 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white">
+                    Pontuação Combinada Final ({ownRecognitionView.formula.version})
+                  </span>
+                  <span className="text-lg font-mono font-black text-amber-400">
+                    {ownRecognitionView.scores.finalScore.toFixed(2)} pts
+                  </span>
+                </div>
+                <div className="text-slate-300 space-y-1 pt-1">
+                  <div className="font-semibold text-slate-200">Orientações para evoluir no ciclo:</div>
+                  <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                    {ownRecognitionView.improvementTips.map((tip, idx) => (
+                      <li key={idx}>{tip}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Direito a Revisão e Recurso */}
+              <div className="p-4 rounded-2xl bg-[#141420] border border-white/10 space-y-3 text-xs">
+                <div className="font-bold text-white">
+                  Solicitar Revisão Administrativa ou Recurso de Pontuação
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={appealText}
+                    onChange={(e) => setAppealText(e.target.value)}
+                    placeholder="Descreva sua dúvida ou solicitação de revisão das métricas..."
+                    className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        monthlyRecognitionService.submitCreatorAppeal({
+                          cycleId: '2026-10',
+                          creatorId: 'current_user',
+                          reason: appealText,
+                          environment: 'sandbox',
+                        });
+                        setAppealText('');
+                        setRecognitionRefresh((r) => r + 1);
+                        setAppealFeedback('Recurso protocolado com sucesso para análise humana!');
+                        setTimeout(() => setAppealFeedback(null), 3500);
+                      } catch (err) {
+                        setAppealFeedback(err instanceof Error ? err.message : 'Erro ao enviar recurso.');
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold cursor-pointer whitespace-nowrap"
+                  >
+                    Protocolar Recurso
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

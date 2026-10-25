@@ -1,0 +1,308 @@
+{
+  "entities": {
+    "UserPublicProfile": {
+      "title": "UserPublicProfile",
+      "description": "Public profile information for a JOBS platform user or creator without sensitive PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Public display name.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "handle": {
+          "type": "string",
+          "description": "Unique public username handle.",
+          "minLength": 2,
+          "maxLength": 50,
+          "pattern": "^[a-zA-Z0-9_\\-@\\.]+$"
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "URL for public avatar image.",
+          "maxLength": 500
+        },
+        "bio": {
+          "type": "string",
+          "description": "Short biography.",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": ["uid", "displayName", "handle", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Strictly isolated PII document accessible only by the owner or verified administrators.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Owner UID matching parent user document.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified email address of the user.",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "AdminAuditRecord": {
+      "title": "AdminAuditRecord",
+      "description": "Immutable administrative activity audit event anchored with SHA-256 hash chain.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "description": "Unique identifier of the audit event.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorId": {
+          "type": "string",
+          "description": "UID of the administrator who executed the action.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action category executed.",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "targetType": {
+          "type": "string",
+          "description": "Affected resource type.",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "targetId": {
+          "type": "string",
+          "description": "Identifier of the affected resource.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "result": {
+          "type": "string",
+          "enum": ["success", "failure", "denied"],
+          "description": "Outcome of the administrative operation."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Justification for the action.",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "eventHash": {
+          "type": "string",
+          "description": "SHA-256 canonical hash of the event.",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "previousEventHash": {
+          "type": "string",
+          "description": "SHA-256 hash of the preceding event in the chain.",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        }
+      },
+      "required": [
+        "eventId",
+        "actorId",
+        "action",
+        "targetType",
+        "targetId",
+        "result",
+        "reason",
+        "eventHash",
+        "previousEventHash",
+        "createdAt"
+      ]
+    },
+    "LedgerSnapshot": {
+      "title": "LedgerSnapshot",
+      "description": "Immutable double-entry financial ledger entry persisted in Firestore.",
+      "type": "object",
+      "properties": {
+        "entryId": {
+          "type": "string",
+          "description": "Unique identifier of the ledger entry.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorId": {
+          "type": "string",
+          "description": "UID of the user or administrator associated with the entry.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "operationType": {
+          "type": "string",
+          "description": "Accounting operation type.",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "debitAccount": {
+          "type": "string",
+          "description": "Debited account identifier.",
+          "minLength": 2,
+          "maxLength": 128
+        },
+        "creditAccount": {
+          "type": "string",
+          "description": "Credited account identifier.",
+          "minLength": 2,
+          "maxLength": 128
+        },
+        "amountCents": {
+          "type": "number",
+          "description": "Monetary value in integer cents or credits."
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["BRL", "CREDITS"],
+          "description": "Currency scope of the entry."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["posted", "pending", "voided", "refunded"],
+          "description": "Accounting status of the entry."
+        },
+        "entryHash": {
+          "type": "string",
+          "description": "SHA-256 hash of the ledger entry.",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "previousHash": {
+          "type": "string",
+          "description": "Hash of the preceding ledger entry.",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        }
+      },
+      "required": [
+        "entryId",
+        "actorId",
+        "operationType",
+        "debitAccount",
+        "creditAccount",
+        "amountCents",
+        "currency",
+        "status",
+        "entryHash",
+        "previousHash",
+        "createdAt"
+      ]
+    },
+    "TestAuditProbe": {
+      "title": "TestAuditProbe",
+      "description": "Diagnostic probe document in test_audit collection used to validate Firebase initialization and access permissions.",
+      "type": "object",
+      "properties": {
+        "probeId": {
+          "type": "string",
+          "description": "Identifier of the diagnostic probe.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorId": {
+          "type": "string",
+          "description": "UID of the authenticated user or administrator who wrote the probe.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "active"],
+          "description": "Status of the diagnostic probe."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": ["probeId", "actorId", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserPublicProfile",
+      "description": "Stores public profile information for users and creators."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": "UserPrivateInfo",
+      "description": "Stores isolated PII (email) strictly restricted to the user or verified administrators."
+    },
+    "/admin_audit_logs/{eventId}": {
+      "schema": "AdminAuditRecord",
+      "description": "Append-only administrative audit trail events."
+    },
+    "/ledger_entries/{entryId}": {
+      "schema": "LedgerSnapshot",
+      "description": "Immutable financial ledger entries."
+    },
+    "/test_audit/{docId}": {
+      "schema": "TestAuditProbe",
+      "description": "Diagnostic probe documents for validating Firestore connectivity and access control."
+    }
+  }
+}

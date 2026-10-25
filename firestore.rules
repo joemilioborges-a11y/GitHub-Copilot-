@@ -1,0 +1,252 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================================
+    // Pillar 1: Default Deny
+    // ============================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ============================================================================
+    // Helper Functions
+    // ============================================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isValidPublicProfile(data, userId) {
+      let requiredKeys = ['uid', 'displayName', 'handle', 'createdAt', 'updatedAt'];
+      let allowedKeys = ['uid', 'displayName', 'handle', 'avatarUrl', 'bio', 'createdAt', 'updatedAt'];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(allowedKeys)
+        && data.uid is string
+        && data.uid == userId
+        && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.displayName is string
+        && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.handle is string
+        && data.handle.size() >= 2 && data.handle.size() <= 50
+        && data.handle.matches('^[a-zA-Z0-9_\\-@\\.]+$')
+        && (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateInfo(data, userId) {
+      let keys = ['uid', 'email', 'createdAt', 'updatedAt'];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.uid is string
+        && data.uid == userId
+        && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.email is string
+        && data.email.size() >= 3 && data.email.size() <= 254
+        && data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdminAuditRecord(data, eventId) {
+      let keys = [
+        'eventId',
+        'actorId',
+        'action',
+        'targetType',
+        'targetId',
+        'result',
+        'reason',
+        'eventHash',
+        'previousEventHash',
+        'createdAt'
+      ];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.eventId is string
+        && data.eventId == eventId
+        && data.eventId.size() >= 1 && data.eventId.size() <= 128
+        && data.actorId is string
+        && data.actorId == request.auth.uid
+        && data.actorId.size() >= 1 && data.actorId.size() <= 128
+        && data.action is string
+        && data.action.size() >= 2 && data.action.size() <= 64
+        && data.targetType is string
+        && data.targetType.size() >= 2 && data.targetType.size() <= 64
+        && data.targetId is string
+        && data.targetId.size() >= 1 && data.targetId.size() <= 128
+        && data.result is string
+        && (data.result == 'success' || data.result == 'failure' || data.result == 'denied')
+        && data.reason is string
+        && data.reason.size() >= 1 && data.reason.size() <= 500
+        && data.eventHash is string
+        && data.eventHash.size() == 64
+        && data.eventHash.matches('^[a-f0-9]{64}$')
+        && data.previousEventHash is string
+        && data.previousEventHash.size() == 64
+        && data.previousEventHash.matches('^[a-f0-9]{64}$')
+        && data.createdAt is timestamp
+        && data.createdAt == request.time;
+    }
+
+    function isValidLedgerSnapshot(data, entryId) {
+      let keys = [
+        'entryId',
+        'actorId',
+        'operationType',
+        'debitAccount',
+        'creditAccount',
+        'amountCents',
+        'currency',
+        'status',
+        'entryHash',
+        'previousHash',
+        'createdAt'
+      ];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.entryId is string
+        && data.entryId == entryId
+        && data.entryId.size() >= 1 && data.entryId.size() <= 128
+        && data.actorId is string
+        && data.actorId == request.auth.uid
+        && data.actorId.size() >= 1 && data.actorId.size() <= 128
+        && data.operationType is string
+        && data.operationType.size() >= 2 && data.operationType.size() <= 64
+        && data.debitAccount is string
+        && data.debitAccount.size() >= 2 && data.debitAccount.size() <= 128
+        && data.creditAccount is string
+        && data.creditAccount.size() >= 2 && data.creditAccount.size() <= 128
+        && data.amountCents is int
+        && data.amountCents > 0 && data.amountCents <= 100000000
+        && data.currency is string
+        && (data.currency == 'BRL' || data.currency == 'CREDITS')
+        && data.status is string
+        && (data.status == 'posted' || data.status == 'pending' || data.status == 'voided' || data.status == 'refunded')
+        && data.entryHash is string
+        && data.entryHash.size() >= 16 && data.entryHash.size() <= 128
+        && data.previousHash is string
+        && data.previousHash.size() >= 16 && data.previousHash.size() <= 128
+        && data.createdAt is timestamp
+        && data.createdAt == request.time;
+    }
+
+    function isValidTestAuditProbe(data, docId) {
+      let keys = ['probeId', 'actorId', 'status', 'createdAt', 'updatedAt'];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.probeId is string
+        && data.probeId == docId
+        && data.probeId.size() >= 1 && data.probeId.size() <= 128
+        && data.actorId is string
+        && data.actorId == request.auth.uid
+        && data.actorId.size() >= 1 && data.actorId.size() <= 128
+        && data.status is string
+        && (data.status == 'ok' || data.status == 'active')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // ============================================================================
+    // Admin RBAC Directory
+    // ============================================================================
+    match /admins/{adminId} {
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasAll(['uid', 'grantedAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'grantedAt'])
+        && request.resource.data.uid is string
+        && request.resource.data.uid == adminId
+        && request.resource.data.grantedAt is timestamp
+        && request.resource.data.grantedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================================
+    // Public User Profiles (No PII)
+    // ============================================================================
+    match /users/{userId} {
+      allow get, list: if isSignedIn();
+      allow create: if isOwner(userId)
+        && isValidPublicProfile(request.resource.data, userId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isOwner(userId)
+        && isValidPublicProfile(request.resource.data, userId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isOwner(userId) || isAdmin();
+
+      // ==========================================================================
+      // Private User PII Subcollection
+      // ==========================================================================
+      match /private/{docId} {
+        allow get, list: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId)
+          && docId == 'profile'
+          && isValidPrivateInfo(request.resource.data, userId)
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        allow update: if isOwner(userId)
+          && docId == 'profile'
+          && isValidPrivateInfo(request.resource.data, userId)
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // ============================================================================
+    // Immutable Administrative Audit Logs
+    // ============================================================================
+    match /admin_audit_logs/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && isValidAdminAuditRecord(request.resource.data, eventId);
+      allow update, delete: if false;
+    }
+
+    // ============================================================================
+    // Immutable Financial Ledger Snapshots
+    // ============================================================================
+    match /ledger_entries/{entryId} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.actorId == request.auth.uid);
+      allow create: if (isAdmin() || isSignedIn()) && isValidLedgerSnapshot(request.resource.data, entryId);
+      allow update, delete: if false;
+    }
+
+    // ============================================================================
+    // Diagnostic Connectivity & Permission Probe (test_audit)
+    // Principle of Least Privilege:
+    // - Read: Authenticated users and administrators only.
+    // - Create/Update: Authenticated user (owning actorId) or verified admin with strict schema & server timestamps.
+    // - Delete: Verified administrators only.
+    // ============================================================================
+    match /test_audit/{docId} {
+      allow get, list: if isSignedIn() || isAdmin();
+      allow create: if (isSignedIn() || isAdmin())
+        && isValidTestAuditProbe(request.resource.data, docId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if (isAdmin() || (isSignedIn() && resource.data.actorId == request.auth.uid))
+        && isValidTestAuditProbe(request.resource.data, docId)
+        && request.resource.data.probeId == resource.data.probeId
+        && request.resource.data.actorId == resource.data.actorId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+  }
+}
