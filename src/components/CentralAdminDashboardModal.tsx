@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
   LayoutDashboard,
@@ -35,6 +35,8 @@ import {
   ChevronRight,
   FileCheck2,
   ShieldCheck,
+  FastForward,
+  CalendarClock,
 } from 'lucide-react';
 import { monetizationService } from '../services/monetizationService';
 import {
@@ -55,7 +57,16 @@ import { JobsCreatorStudio } from './admin/JobsCreatorStudio';
 import { AdminActivityLog } from './admin/AdminActivityLog';
 import { MonthlyRecognitionAdminPanel } from './admin/MonthlyRecognitionAdminPanel';
 import { VrSimulatorControlPanel } from './admin/VrSimulatorControlPanel';
+import { RevenueAndEarningsReportPanel } from './admin/RevenueAndEarningsReportPanel';
 import { adminAuditService } from '../services/adminAuditService';
+import {
+  vrSimulatorService,
+  SimulationTopBannerStatus,
+  VrSimulatorStateSnapshot,
+  VR_SIMULATOR_WATERMARK,
+  VR_FINANCIAL_SIMULATION_BADGE,
+  VR_SIMULATOR_NAMESPACE,
+} from '../services/vrSimulatorService';
 
 interface CentralAdminDashboardModalProps {
   onClose: () => void;
@@ -84,7 +95,7 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
   const [feedbackToast, setFeedbackToast] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Sub-abas de visualização para integrar módulos especializados dentro dos 12 tópicos
-  const [walletSubTab, setWalletSubTab] = useState<'ledger' | 'executive_financial'>('ledger');
+  const [walletSubTab, setWalletSubTab] = useState<'ledger' | 'executive_financial' | 'revenue_earnings_report'>('ledger');
   const [contentsSubTab, setContentsSubTab] = useState<'catalog' | 'live_audit'>('catalog');
   const [creatorsSubTab, setCreatorsSubTab] = useState<'creators_ranking' | 'monthly_recognition' | 'creator_studio' | 'creators_list' | 'live_monitoring'>('creators_ranking');
   const [securitySubTab, setSecuritySubTab] = useState<'admin_activity' | 'crypto_ledger' | 'events'>('admin_activity');
@@ -113,10 +124,120 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [testSuiteOutput, setTestSuiteOutput] = useState<any | null>(null);
 
+  // Estado sincronizado do Relógio Controlado e Snapshot Isolado do Simulador VR
+  const [vrSnapshot, setVrSnapshot] = useState<VrSimulatorStateSnapshot>(() => {
+    vrSimulatorService.ensureDayOneStarted();
+    return vrSimulatorService.getStateSnapshot();
+  });
+  const [simBannerStatus, setSimBannerStatus] = useState<SimulationTopBannerStatus>(() => {
+    vrSimulatorService.ensureDayOneStarted();
+    return vrSimulatorService.getTopBannerStatus();
+  });
+  const [selectedTargetSimDay, setSelectedTargetSimDay] = useState<number>(() => {
+    const initialBanner = vrSimulatorService.getTopBannerStatus();
+    return Math.min(initialBanner.totalDays, initialBanner.currentDay + 1);
+  });
+  const [isAdvancingSimDay, setIsAdvancingSimDay] = useState(false);
+  const [simBannerError, setSimBannerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    vrSimulatorService.ensureDayOneStarted();
+    const syncSimulatorBanner = () => {
+      const nextSnapshot = vrSimulatorService.getStateSnapshot();
+      const nextBanner = nextSnapshot.topBannerStatus;
+      setVrSnapshot(nextSnapshot);
+      setSimBannerStatus(nextBanner);
+      setSelectedTargetSimDay((prevSelected) => {
+        if (prevSelected <= nextBanner.currentDay && nextBanner.currentDay < nextBanner.totalDays) {
+          return Math.min(nextBanner.totalDays, nextBanner.currentDay + 1);
+        }
+        return Math.min(nextBanner.totalDays, Math.max(nextBanner.currentDay, prevSelected));
+      });
+    };
+    syncSimulatorBanner();
+    return vrSimulatorService.subscribe(syncSimulatorBanner);
+  }, []);
+
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setFeedbackToast({ text, type });
     setTimeout(() => setFeedbackToast(null), 3500);
   };
+
+  // Avanço manual controlado da data simulada (testes de carga Dia 1 -> Dia 30)
+  const handleAdvanceToSpecificDay = (targetDayOverride?: number) => {
+    if (isAdvancingSimDay) return;
+    const targetDay = typeof targetDayOverride === 'number' ? targetDayOverride : selectedTargetSimDay;
+    setIsAdvancingSimDay(true);
+    setSimBannerError(null);
+    try {
+      const result = vrSimulatorService.manualAdvanceSimulatedDay({
+        targetDay,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+      const updatedSnapshot = vrSimulatorService.getStateSnapshot();
+      setVrSnapshot(updatedSnapshot);
+      setSimBannerStatus(updatedSnapshot.topBannerStatus);
+      setSelectedTargetSimDay((prev) => {
+        if (targetDay < updatedSnapshot.totalDays) {
+          return Math.min(updatedSnapshot.totalDays, updatedSnapshot.currentDay + 1);
+        }
+        return updatedSnapshot.totalDays;
+      });
+
+      if (!result.success) {
+        const msg =
+          result.errorMessage ||
+          'Não foi possível avançar a data simulada. O estado anterior foi mantido.';
+        setSimBannerError(msg);
+        showToast(msg, 'error');
+        return;
+      }
+
+      if (result.noOp) {
+        showToast(
+          `A simulação já está no Dia ${result.confirmedDay}. Nenhum evento duplicado foi gerado.`,
+          'info'
+        );
+        return;
+      }
+
+      doRefresh();
+      showToast(
+        `Relógio simulado avançado com sucesso do Dia ${result.previousDay} para o Dia ${result.confirmedDay} (${result.checkpointsProcessedCount} dia(s) processado(s)).`,
+        'success'
+      );
+    } catch (err: any) {
+      const errMsg =
+        err?.message ||
+        'Erro inesperado no serviço do relógio simulado. O dia anterior foi preservado.';
+      setSimBannerError(errMsg);
+      showToast(errMsg, 'error');
+    } finally {
+      setIsAdvancingSimDay(false);
+    }
+  };
+
+  const handleManualAdvanceSimulatedDay = () => handleAdvanceToSpecificDay();
+
+  // Helper de formatação monetária de centavos inteiros para BRL
+  const formatBrlFromCents = (cents: number): string =>
+    `R$ ${(cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const lastCheckpoint =
+    vrSnapshot.checkpoints.length > 0
+      ? vrSnapshot.checkpoints[vrSnapshot.checkpoints.length - 1]
+      : null;
+  const invariantValues = Object.values(vrSnapshot.latestReconciliation.invariantsPassed);
+  const invariantsPassedCount = invariantValues.filter(Boolean).length;
+  const reconciliationErrorsCount = invariantValues.filter((passed) => !passed).length;
+  const totalSimulatedMonetizedTransactions =
+    vrSnapshot.totals.creditPurchasesCount +
+    vrSnapshot.totals.paidVaultUnlocksCount +
+    vrSnapshot.totals.giftsSentCount +
+    vrSnapshot.totals.challengesCompletedCount +
+    vrSnapshot.totals.refundsAndReversalsCount +
+    vrSnapshot.totals.payoutsSettledCount;
 
   // Ações em Compras Simuladas
   const handleApprovePurchase = async (id: string) => {
@@ -376,6 +497,154 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
           </div>
         </div>
 
+        {/* ================================================================== */}
+        {/* INDICADOR VISUAL FIXO DO SIMULADOR E SELETOR DE AVANÇO MANUAL       */}
+        {/* Posicionado fora do container de rolagem (<main overflow-y-auto>)   */}
+        {/* ================================================================== */}
+        {simBannerStatus.bannerVisible && simBannerStatus.isStateConfirmed && simBannerStatus.indicatorText && (
+          <div
+            data-testid="simulation-mode-top-banner"
+            className="px-5 py-2.5 border-b border-amber-500/40 bg-gradient-to-r from-amber-950/80 via-[#14111d] to-rose-950/70 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-inner"
+          >
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-400/50 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                <span
+                  data-testid="simulation-mode-indicator-text"
+                  className="text-xs sm:text-sm font-black tracking-wider text-amber-200 font-mono uppercase"
+                >
+                  {simBannerStatus.indicatorText}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 text-[11px] text-slate-300">
+                <CalendarClock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  Data simulada:{' '}
+                  <strong className="text-white font-mono">
+                    {new Date(simBannerStatus.simulatedDateIso).toLocaleDateString('pt-BR', {
+                      timeZone: 'UTC',
+                    })}
+                  </strong>
+                </span>
+                <span className="text-slate-600">•</span>
+                <span className="font-mono text-[10px] text-amber-300/90 hidden lg:inline">
+                  {simBannerStatus.shortBadge} ({simBannerStatus.namespace})
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <label
+                htmlFor="sim-manual-day-select"
+                className="text-[11px] font-bold text-slate-300 uppercase tracking-wider"
+              >
+                Teste de Carga (Dia 1–{simBannerStatus.totalDays}):
+              </label>
+
+              <select
+                id="sim-manual-day-select"
+                data-testid="simulation-day-selector"
+                value={selectedTargetSimDay}
+                disabled={isAdvancingSimDay}
+                onChange={(e) => {
+                  const parsed = Number.parseInt(e.target.value, 10);
+                  if (Number.isFinite(parsed)) {
+                    setSelectedTargetSimDay(parsed);
+                    setSimBannerError(null);
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-950/90 border border-amber-500/40 text-xs font-mono font-bold text-white focus:outline-none focus:border-amber-400 disabled:opacity-50 cursor-pointer"
+              >
+                {Array.from({ length: simBannerStatus.totalDays }, (_, idx) => idx + 1).map(
+                  (dayNum) => {
+                    const isPast = dayNum < simBannerStatus.currentDay;
+                    const isCurrent = dayNum === simBannerStatus.currentDay;
+                    const delta = dayNum - simBannerStatus.currentDay;
+                    return (
+                      <option key={dayNum} value={dayNum} disabled={isPast}>
+                        {isCurrent
+                          ? `Dia ${dayNum} (Dia Atual)`
+                          : isPast
+                          ? `Dia ${dayNum} (Anterior — bloqueado)`
+                          : `Dia ${dayNum} (+${delta} ${delta === 1 ? 'dia' : 'dias'})`}
+                      </option>
+                    );
+                  }
+                )}
+              </select>
+
+              <button
+                type="button"
+                data-testid="simulation-advance-date-btn"
+                onClick={handleManualAdvanceSimulatedDay}
+                disabled={
+                  isAdvancingSimDay ||
+                  selectedTargetSimDay < simBannerStatus.currentDay ||
+                  selectedTargetSimDay > simBannerStatus.totalDays
+                }
+                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-slate-950 hover:text-white font-extrabold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+              >
+                <FastForward className="w-3.5 h-3.5" />
+                <span>{isAdvancingSimDay ? 'Avançando...' : 'Avançar data'}</span>
+              </button>
+
+              {activeSection !== 'vr_simulator' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('vr_simulator')}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-[11px] font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  Painel VR
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Estado de Erro ou Indisponibilidade quando o estado da simulação não puder ser confirmado */}
+        {simBannerStatus.bannerVisible && !simBannerStatus.isStateConfirmed && (
+          <div
+            data-testid="simulation-mode-unconfirmed-banner"
+            className="px-5 py-2 border-b border-rose-500/50 bg-rose-950/80 flex items-center justify-between gap-3 shrink-0"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold text-rose-200">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>
+                ESTADO DA SIMULAÇÃO INDISPONÍVEL —{' '}
+                {simBannerStatus.serviceErrorMessage ||
+                  'Não foi possível confirmar o estado do relógio simulado.'}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-rose-300 uppercase">
+              Avanço Manual Bloqueado
+            </span>
+          </div>
+        )}
+
+        {/* Alerta de erro em tentativa de avanço manual mantendo o dia anterior */}
+        {(simBannerError || (simBannerStatus.hasServiceError && simBannerStatus.isStateConfirmed)) && (
+          <div
+            data-testid="simulation-advance-error-alert"
+            className="px-5 py-2 border-b border-rose-500/40 bg-rose-950/60 flex items-center justify-between gap-2 text-xs text-rose-200 shrink-0"
+          >
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span>
+                {simBannerError || simBannerStatus.serviceErrorMessage} (Mantido em:{' '}
+                <strong>{simBannerStatus.indicatorText}</strong>)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSimBannerError(null)}
+              className="text-rose-300 hover:text-white text-[11px] font-bold cursor-pointer"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
+
         {/* Toast Feedback */}
         {feedbackToast && (
           <div
@@ -484,6 +753,186 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* ============================================================== */}
+                {/* BLOCO ISOLADO: INDICADORES EXECUTIVOS DO SIMULADOR VR (SANDBOX) */}
+                {/* ============================================================== */}
+                <div
+                  data-testid="vr-simulator-overview-indicators-panel"
+                  className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#0c1322] via-[#0e0f1a] to-[#130d1c] border border-cyan-500/30 space-y-4"
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-3 border-b border-slate-800/80">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          data-testid="vr-overview-clock-indicator"
+                          className="px-2.5 py-0.5 rounded-md bg-cyan-500/15 border border-cyan-400/40 text-cyan-300 text-xs font-black tracking-wide uppercase"
+                        >
+                          {simBannerStatus.indicatorText}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
+                          {VR_FINANCIAL_SIMULATION_BADGE}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-300 border border-slate-700">
+                          namespace: {VR_SIMULATOR_NAMESPACE}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {VR_SIMULATOR_WATERMARK} · Relógio Simulado: <strong className="text-white font-mono">{simBannerStatus.simulatedDateIso.slice(0, 10)}</strong> · Isolamento de Produção: <strong className="text-emerald-400">100% Segregado (productionDataTouched: false)</strong>
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveSection('vr_simulator')}
+                      className="px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer self-start lg:self-auto"
+                    >
+                      <PlayCircle className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Abrir Painel Completo do Simulador VR</span>
+                    </button>
+                  </div>
+
+                  {/* 5 Grupos de Indicadores Solicitados do Simulador VR */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                    {/* 1. Criadores Fictícios e Crescimento Diário */}
+                    <div
+                      data-testid="vr-indicator-creators-growth"
+                      className="bg-slate-900/90 border border-slate-800 p-3.5 rounded-xl space-y-1"
+                    >
+                      <span className="text-[11px] text-slate-400 font-medium">Criadores Fictícios & Crescimento</span>
+                      <div className="text-xl font-black text-cyan-300 font-mono">
+                        {vrSnapshot.creators.length} criadores
+                      </div>
+                      <div className="text-[10px] text-slate-300 font-mono">
+                        {vrSnapshot.fansCount} fãs sintéticos (+{lastCheckpoint ? lastCheckpoint.newFansAdded : vrSnapshot.capacityConfig.dailyNewFansRate}/dia)
+                      </div>
+                      <span className="text-[10px] text-emerald-400 block">
+                        Taxa alvo: +{vrSnapshot.capacityConfig.dailyNewFansRate} novos fãs/dia
+                      </span>
+                    </div>
+
+                    {/* 2. Quantidade de Transações Simuladas */}
+                    <div
+                      data-testid="vr-indicator-transactions-count"
+                      className="bg-slate-900/90 border border-slate-800 p-3.5 rounded-xl space-y-1"
+                    >
+                      <span className="text-[11px] text-slate-400 font-medium">Transações Simuladas (Sandbox)</span>
+                      <div className="text-xl font-black text-white font-mono">
+                        {vrSnapshot.ledgerEntriesCount} lançamentos
+                      </div>
+                      <div className="text-[10px] text-slate-300 font-mono">
+                        {totalSimulatedMonetizedTransactions} eventos monetizados
+                      </div>
+                      <span className="text-[10px] text-slate-400 block">
+                        {vrSnapshot.totals.paidVaultUnlocksCount} desbl. · {vrSnapshot.totals.giftsSentCount} pres. · {vrSnapshot.totals.challengesCompletedCount} desaf.
+                      </span>
+                    </div>
+
+                    {/* 3. Receita Elegível de Teste & Split 70/30 */}
+                    <div
+                      data-testid="vr-indicator-eligible-revenue-split"
+                      className="bg-slate-900/90 border border-slate-800 p-3.5 rounded-xl space-y-1"
+                    >
+                      <span className="text-[11px] text-slate-400 font-medium">Receita Elegível Líquida (70/30)</span>
+                      <div className="text-xl font-black text-emerald-400 font-mono">
+                        {formatBrlFromCents(vrSnapshot.latestReconciliation.netEligibleRevenueCents)}
+                      </div>
+                      <div className="text-[10px] text-amber-300 font-mono">
+                        30% JOBS: {formatBrlFromCents(vrSnapshot.latestReconciliation.netPlatformShareCents)}
+                      </div>
+                      <span className="text-[10px] text-rose-300 font-mono block">
+                        70% Criadores: {formatBrlFromCents(vrSnapshot.latestReconciliation.netCreatorShareCents)}
+                      </span>
+                    </div>
+
+                    {/* 4. Estornos e Pagamentos Simulados */}
+                    <div
+                      data-testid="vr-indicator-refunds-payouts"
+                      className="bg-slate-900/90 border border-slate-800 p-3.5 rounded-xl space-y-1"
+                    >
+                      <span className="text-[11px] text-slate-400 font-medium">Estornos & Repasses Simulados</span>
+                      <div className="text-sm font-black text-rose-400 font-mono">
+                        Estornos: {formatBrlFromCents(vrSnapshot.latestReconciliation.refundedGrossCents)} ({vrSnapshot.totals.refundsAndReversalsCount})
+                      </div>
+                      <div className="text-sm font-black text-cyan-300 font-mono">
+                        Pagos: {formatBrlFromCents(vrSnapshot.latestReconciliation.settledCreatorPayoutsCents)} ({vrSnapshot.totals.payoutsSettledCount}/{vrSnapshot.totals.payoutsRequestedCount})
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono block">
+                        Obrigações pend.: {formatBrlFromCents(vrSnapshot.latestReconciliation.pendingCreatorObligationsCents)}
+                      </span>
+                    </div>
+
+                    {/* 5. Estado de Integridade e Erros de Reconciliação */}
+                    <div
+                      data-testid="vr-indicator-integrity-reconciliation"
+                      className="bg-slate-900/90 border border-slate-800 p-3.5 rounded-xl space-y-1"
+                    >
+                      <span className="text-[11px] text-slate-400 font-medium">Integridade & Reconciliação</span>
+                      <div
+                        className={`text-base font-black font-mono flex items-center gap-1.5 ${
+                          vrSnapshot.latestReconciliation.isBalanced && reconciliationErrorsCount === 0
+                            ? 'text-emerald-400'
+                            : 'text-rose-400'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>
+                          {vrSnapshot.latestReconciliation.isBalanced && reconciliationErrorsCount === 0
+                            ? 'RECONCILIADO (Δ R$ 0,00)'
+                            : `ERRO (Δ ${vrSnapshot.latestReconciliation.reconciliationDeltaCents}c)`}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-300 font-mono">
+                        Invariantes: {invariantsPassedCount}/{invariantValues.length} OK · Erros: {reconciliationErrorsCount}
+                      </div>
+                      <span className="text-[10px] text-emerald-400 font-mono block">
+                        Duplo gasto bloqueado: {vrSnapshot.totals.doubleSpendBlockedCount}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Série Diária Isolada do Simulador VR (Sem mistura com dados reais) */}
+                  {vrSnapshot.dailyFinancialEvolution.length > 0 && (
+                    <div
+                      data-testid="vr-isolated-daily-chart"
+                      className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/90 space-y-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                          <CalendarClock className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Série Histórica Isolada do Simulador (Dia 1 ao Dia {vrSnapshot.currentDay}) — Somente Registros `isSandbox: true`</span>
+                        </span>
+                        <span className="font-mono text-[10px] text-cyan-300">
+                          Caixa de Teste Disponível: {formatBrlFromCents(vrSnapshot.latestReconciliation.availableSimulatedTestCashCents)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5 pt-1 items-end h-20">
+                        {vrSnapshot.dailyFinancialEvolution.slice(-10).map((pt) => {
+                          const maxRev = Math.max(
+                            1,
+                            ...vrSnapshot.dailyFinancialEvolution.slice(-10).map((d) => d.dayNetRecognizedRevenueCents)
+                          );
+                          const heightPct = Math.max(12, Math.round((pt.dayNetRecognizedRevenueCents / maxRev) * 100));
+                          return (
+                            <div
+                              key={pt.simDay}
+                              className="flex flex-col items-center justify-end h-full gap-1"
+                              title={`Dia ${pt.simDay} (${pt.displayDate}): Líquido ${formatBrlFromCents(pt.dayNetRecognizedRevenueCents)} | 30% JOBS ${formatBrlFromCents(pt.dayPlatformCommissionCents)} | 70% Criadores ${formatBrlFromCents(pt.dayCreatorRemunerationCents)}`}
+                            >
+                              <div className="w-full flex items-end justify-center gap-0.5 h-12">
+                                <div
+                                  className="w-2.5 bg-cyan-500/80 rounded-t"
+                                  style={{ height: `${heightPct}%` }}
+                                />
+                              </div>
+                              <span className="text-[9px] font-mono text-slate-400">D{pt.simDay}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 1. Bloco de Usuários & Criadores */}
@@ -757,14 +1206,28 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                 </div>
 
                 {/* Regulatory Sandbox Disclaimer Card */}
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/30 via-slate-900 to-slate-900 border border-amber-500/30 flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="text-xs text-slate-300 space-y-1">
-                    <p className="font-bold text-white">Ambiente de Testes Auditado — Fase 1</p>
-                    <p className="text-slate-400 leading-relaxed">
-                      Nenhuma cobrança bancária real ou transação PIX externa é liquidada nesta fase. Todas as operações utilizam chaves de idempotência, lançamentos imutáveis de partidas dobradas e tokens temporários expiráveis.
-                    </p>
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/30 via-slate-900 to-slate-900 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="text-xs text-slate-300 space-y-1">
+                      <p className="font-bold text-white">Ambiente de Testes Auditado — Fase 1</p>
+                      <p className="text-slate-400 leading-relaxed">
+                        Nenhuma cobrança bancária real ou transação PIX externa é liquidada nesta fase. Todas as operações utilizam chaves de idempotência, lançamentos imutáveis de partidas dobradas e tokens temporários expiráveis.
+                      </p>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSection('wallet');
+                      setWalletSubTab('revenue_earnings_report');
+                    }}
+                    data-testid="open-revenue-earnings-report-btn"
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <TrendingUp className="w-4 h-4" />
+                    Relatório de Receitas & Ganhos (70/30)
+                  </button>
                 </div>
               </div>
             )}
@@ -775,7 +1238,7 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
             {activeSection === 'wallet' && (
               <div className="space-y-4">
                 {/* Sub-tab Navigation */}
-                <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-2">
                   <button
                     onClick={() => setWalletSubTab('ledger')}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -797,9 +1260,23 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                     <DollarSign className="w-3.5 h-3.5" />
                     Painel Financeiro Executivo & Rankings
                   </button>
+                  <button
+                    onClick={() => setWalletSubTab('revenue_earnings_report')}
+                    data-testid="wallet-subtab-revenue-report"
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      walletSubTab === 'revenue_earnings_report'
+                        ? 'bg-cyan-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800'
+                    }`}
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    Relatório de Receitas & Ganhos (70/30)
+                  </button>
                 </div>
 
-                {walletSubTab === 'executive_financial' ? (
+                {walletSubTab === 'revenue_earnings_report' ? (
+                  <RevenueAndEarningsReportPanel />
+                ) : walletSubTab === 'executive_financial' ? (
                   <PlatformFinancialExecutive />
                 ) : (
                   <div className="space-y-4">
@@ -1831,7 +2308,333 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
             {/* ============================================================== */}
             {/* SEÇÃO 13: SIMULADOR DE REALIDADE VIRTUAL (CICLO DE 30 DIAS)     */}
             {/* ============================================================== */}
-            {activeSection === 'vr_simulator' && <VrSimulatorControlPanel />}
+            {activeSection === 'vr_simulator' && (
+              <div className="space-y-6">
+                {/* Seletor de Avanço Manual de Data (Dias 1 a 30) Integrado com o Relógio do Simulador */}
+                <div
+                  data-testid="vr-simulation-tab-manual-day-selector"
+                  className="bg-gradient-to-b from-[#161224] to-[#0d0d16] border-2 border-fuchsia-500/40 rounded-2xl p-5 shadow-2xl space-y-5"
+                >
+                  {/* Cabeçalho do Seletor */}
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-fuchsia-500/20">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="p-1.5 rounded-lg bg-fuchsia-500/20 text-fuchsia-400">
+                          <CalendarClock className="w-5 h-5" />
+                        </span>
+                        <h3 className="text-base font-black text-white tracking-wide flex items-center gap-2">
+                          Seletor de Avanço Manual de Data (Dias 1 a 30)
+                        </h3>
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 font-mono">
+                          MODO SIMULAÇÃO — DIA {vrSnapshot.currentDay}
+                        </span>
+                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                          {vrSnapshot.currentSimulatedDateIso.slice(0, 10)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        Avança o relógio simulado de forma cronológica e determinística (Dias 1 a 30).
+                        Todos os indicadores e métricas financeiras reagem instantaneamente na transição do dia:
+                        split 70/30 de receita elegível, repasse de criadores, comissão JOBS, livro-razão e ranking.
+                      </p>
+                    </div>
+
+                    {/* Status & Garantias */}
+                    <div className="flex items-center gap-2 text-xs shrink-0 flex-wrap">
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span>Isolamento:</span>
+                        <strong className="text-emerald-400 font-mono">Zero Produção</strong>
+                      </div>
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Retrocesso:</span>
+                        <strong className="text-rose-400">Bloqueado</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Barra de Ações Rápidas & Seleção por Dropdown */}
+                  <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                    {/* Seletor Dropdown */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label htmlFor="sim-tab-day-select" className="text-xs font-bold text-slate-300 whitespace-nowrap">
+                        Avançar para:
+                      </label>
+                      <select
+                        id="sim-tab-day-select"
+                        value={selectedTargetSimDay}
+                        onChange={(e) => setSelectedTargetSimDay(Number(e.target.value))}
+                        disabled={isAdvancingSimDay || vrSnapshot.currentDay >= vrSnapshot.totalDays}
+                        className="bg-slate-900 border border-slate-700 text-white text-xs font-mono rounded-lg px-3 py-2 outline-none focus:border-fuchsia-500 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {Array.from({ length: vrSnapshot.totalDays }, (_, i) => i + 1).map((d) => {
+                          const isPast = d < vrSnapshot.currentDay;
+                          const isCurrent = d === vrSnapshot.currentDay;
+                          return (
+                            <option
+                              key={d}
+                              value={d}
+                              disabled={isPast}
+                              className={isPast ? 'text-slate-600 bg-slate-950' : 'text-white bg-slate-900'}
+                            >
+                              Dia {d} {isCurrent ? '(Dia Atual · Ativo)' : isPast ? '(Consolidado · Passado)' : '(Disponível para Avanço)'}
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAdvanceToSpecificDay(selectedTargetSimDay)}
+                        disabled={
+                          isAdvancingSimDay ||
+                          selectedTargetSimDay < vrSnapshot.currentDay ||
+                          selectedTargetSimDay > vrSnapshot.totalDays ||
+                          vrSnapshot.currentDay >= vrSnapshot.totalDays
+                        }
+                        className="px-4 py-2 rounded-lg bg-gradient-to-r from-fuchsia-600 to-amber-500 hover:from-fuchsia-500 hover:to-amber-400 text-white font-extrabold text-xs flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-md transition-all shrink-0"
+                      >
+                        {isAdvancingSimDay ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Processando Carga...</span>
+                          </>
+                        ) : (
+                          <>
+                            <FastForward className="w-3.5 h-3.5" />
+                            <span>Avançar para Dia {selectedTargetSimDay}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Botões Rápidos (+1, +5, +7, Dia 15, Dia 30) */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-semibold text-slate-400 mr-1">Saltos:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleAdvanceToSpecificDay(vrSnapshot.currentDay + 1)}
+                        disabled={isAdvancingSimDay || vrSnapshot.currentDay >= 30}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-700 text-white text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                        title="Avança exatamente 1 dia simulado"
+                      >
+                        <FastForward className="w-3 h-3 text-fuchsia-400" />
+                        +1 Dia
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAdvanceToSpecificDay(Math.min(30, vrSnapshot.currentDay + 5))}
+                        disabled={isAdvancingSimDay || vrSnapshot.currentDay >= 30}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-700 text-white text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                        title="Avança 5 dias simulados"
+                      >
+                        <FastForward className="w-3 h-3 text-cyan-400" />
+                        +5 Dias
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAdvanceToSpecificDay(Math.min(30, vrSnapshot.currentDay + 7))}
+                        disabled={isAdvancingSimDay || vrSnapshot.currentDay >= 30}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-700 text-white text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                        title="Avança 1 semana (7 dias)"
+                      >
+                        <FastForward className="w-3 h-3 text-amber-400" />
+                        +7 Dias
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAdvanceToSpecificDay(15)}
+                        disabled={isAdvancingSimDay || vrSnapshot.currentDay >= 15}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-700 text-white text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                        title="Avança diretamente para o Dia 15 (meio do ciclo)"
+                      >
+                        Dia 15
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAdvanceToSpecificDay(30)}
+                        disabled={isAdvancingSimDay || vrSnapshot.currentDay >= 30}
+                        className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-rose-600 hover:opacity-95 disabled:opacity-30 text-white text-xs font-black transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                        title="Avança até o encerramento do ciclo de 30 dias"
+                      >
+                        Dia 30 (Final)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Matriz Visual Interativa dos 30 Dias (Dias 1 a 30) */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                        Linha Temporal dos 30 Dias Simulados
+                        <span className="text-[11px] font-mono font-normal text-slate-400 lowercase">
+                          (clique em qualquer dia futuro para avançar)
+                        </span>
+                      </span>
+                      <span className="font-mono text-slate-400 text-[11px]">
+                        Dia {vrSnapshot.currentDay} de 30 ({Math.min(100, Math.round((vrSnapshot.currentDay / 30) * 100))}%)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-10 gap-2">
+                      {Array.from({ length: 30 }, (_, idx) => {
+                        const dayNum = idx + 1;
+                        const isPast = dayNum < vrSnapshot.currentDay;
+                        const isCurrent = dayNum === vrSnapshot.currentDay;
+
+                        if (isPast) {
+                          return (
+                            <button
+                              key={dayNum}
+                              type="button"
+                              disabled
+                              title={`Dia ${dayNum} já consolidado no livro-razão. Retrocesso bloqueado por integridade.`}
+                              className="p-2 rounded-xl bg-slate-950/60 border border-slate-850 text-slate-500 font-mono text-xs flex flex-col items-center justify-center gap-0.5 cursor-not-allowed opacity-60"
+                            >
+                              <span className="text-[10px] text-emerald-500/80 flex items-center gap-0.5">
+                                <Check className="w-2.5 h-2.5" /> Ok
+                              </span>
+                              <span className="font-bold">D{dayNum}</span>
+                            </button>
+                          );
+                        }
+
+                        if (isCurrent) {
+                          return (
+                            <button
+                              key={dayNum}
+                              type="button"
+                              disabled={isAdvancingSimDay}
+                              onClick={() => handleAdvanceToSpecificDay(dayNum)}
+                              title={`Dia ${dayNum} é o dia simulado atual. Clique para executar no-op seguro.`}
+                              className="p-2 rounded-xl bg-gradient-to-tr from-amber-500/30 via-fuchsia-600/30 to-rose-500/20 border-2 border-amber-400 text-amber-200 font-mono text-xs flex flex-col items-center justify-center gap-0.5 shadow-lg shadow-amber-500/10 ring-2 ring-amber-400/40 relative cursor-pointer"
+                            >
+                              <span className="text-[9px] font-black uppercase text-amber-300 tracking-tighter flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                                Atual
+                              </span>
+                              <span className="font-black text-sm text-white">D{dayNum}</span>
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <button
+                            key={dayNum}
+                            type="button"
+                            disabled={isAdvancingSimDay}
+                            onClick={() => handleAdvanceToSpecificDay(dayNum)}
+                            title={`Clique para avançar diretamente para o Dia ${dayNum}`}
+                            className="p-2 rounded-xl bg-slate-900/90 hover:bg-fuchsia-950/60 hover:border-fuchsia-400 border border-slate-700/80 text-slate-200 hover:text-white font-mono text-xs flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer group hover:scale-[1.03] active:scale-[0.98]"
+                          >
+                            <span className="text-[10px] text-slate-400 group-hover:text-fuchsia-300 flex items-center gap-0.5">
+                              <ChevronRight className="w-2.5 h-2.5" /> Ir
+                            </span>
+                            <span className="font-bold group-hover:text-fuchsia-200">D{dayNum}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Painel Reativo de Métricas Financeiras Imediatas */}
+                  <div className="space-y-2 pt-2 border-t border-fuchsia-500/20">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                        Reação Financeira Imediata do Livro-Razão (Atualizada no Dia {vrSnapshot.currentDay})
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        Reconciliação:{' '}
+                        <strong
+                          className={
+                            vrSnapshot.latestReconciliation.isBalanced
+                              ? 'text-emerald-400'
+                              : 'text-rose-400'
+                          }
+                        >
+                          {vrSnapshot.latestReconciliation.isBalanced
+                            ? 'ÍNTEGRA (Delta R$ 0,00)'
+                            : 'DIVERGÊNCIA'}
+                        </strong>
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                          Receita Líquida Reconhecida
+                        </span>
+                        <div className="text-xl font-black text-white font-mono">
+                          {formatBrlFromCents(vrSnapshot.latestReconciliation.netEligibleRevenueCents)}
+                        </div>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          Bruto: {formatBrlFromCents(vrSnapshot.latestReconciliation.grossEligibleRevenueCents)} · Estornos: {formatBrlFromCents(vrSnapshot.latestReconciliation.refundedGrossCents)}
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                        <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">
+                          Split Criadores (70% Exato)
+                        </span>
+                        <div className="text-xl font-black text-rose-300 font-mono">
+                          {formatBrlFromCents(vrSnapshot.latestReconciliation.netCreatorShareCents)}
+                        </div>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          Obrigações acumuladas com 100 criadores
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                        <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">
+                          Comissão Plataforma (30% Exato)
+                        </span>
+                        <div className="text-xl font-black text-amber-300 font-mono">
+                          {formatBrlFromCents(vrSnapshot.latestReconciliation.netPlatformShareCents)}
+                        </div>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          Margem líquida da plataforma no sandbox
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                        <span className="text-[11px] font-bold text-cyan-400 uppercase tracking-wider">
+                          Caixa de Teste Disponível
+                        </span>
+                        <div className="text-xl font-black text-cyan-300 font-mono">
+                          {formatBrlFromCents(vrSnapshot.latestReconciliation.availableSimulatedTestCashCents)}
+                        </div>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          Entradas R$ {((vrSnapshot.latestReconciliation.simulatedCashInflowsCents || 0) / 100).toFixed(2)} · Saídas R$ {((vrSnapshot.latestReconciliation.simulatedCashOutflowsCents || 0) / 100).toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Linha adicional de telemetria da carga */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-slate-950/90 border border-slate-850 text-[11px] text-slate-300 font-mono">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span>👥 População: <strong className="text-white">100 Criadores</strong> + <strong className="text-white">{vrSnapshot.fansCount} Fãs</strong></span>
+                        <span>⚡ Transações: <strong className="text-amber-400">{totalSimulatedMonetizedTransactions}</strong></span>
+                        <span>🔓 Vaults: <strong className="text-cyan-400">{vrSnapshot.totals.paidVaultUnlocksCount}</strong></span>
+                        <span>🎁 Gifts: <strong className="text-fuchsia-400">{vrSnapshot.totals.giftsSentCount}</strong></span>
+                        <span>💸 Saques Liquidados: <strong className="text-emerald-400">{vrSnapshot.totals.payoutsSettledCount}</strong> ({formatBrlFromCents(vrSnapshot.latestReconciliation.settledCreatorPayoutsCents)})</span>
+                      </div>
+                      <span className="text-emerald-400 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> 8/8 Invariantes Livro-Razão Aprovados
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Submódulos Aprofundados do Simulador VR */}
+                <VrSimulatorControlPanel />
+              </div>
+            )}
           </main>
         </div>
       </div>

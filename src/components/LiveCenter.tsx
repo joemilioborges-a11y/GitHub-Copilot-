@@ -26,7 +26,19 @@ import {
   ArrowRight,
   Filter,
   X,
+  RotateCcw,
+  MapPin,
 } from 'lucide-react';
+import { INITIAL_PROFILES } from '../data/mockData';
+import { DiscoveryLiveFilterPanel } from './DiscoveryLiveFilterPanel';
+import {
+  DiscoveryAndLiveFilterCriteria,
+  filterLiveSessions,
+  getSavedLivesFilters,
+  setSavedLivesFilters,
+  resetSavedLivesFilters,
+  subscribeLivesFilters,
+} from '../utils/discoveryAndLiveFilters';
 
 export interface LiveCenterProps {
   /** Ação acionada para abrir a sala da live selecionada na navegação existente */
@@ -35,6 +47,10 @@ export interface LiveCenterProps {
   onTabChange?: (tab: LiveCenterTab) => void;
   /** Aba inicial */
   initialTab?: LiveCenterTab;
+  /** Filtro opcional de formato vindo da barra superior de LiveStreamView */
+  formatFilter?: 'all' | LiveSessionModel['format'];
+  /** Lista opcional de criadores bloqueados */
+  blockedUserIds?: string[];
   /** Classes CSS adicionais */
   className?: string;
 }
@@ -43,6 +59,8 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
   onSelectLive,
   onTabChange,
   initialTab = 'ao_vivo',
+  formatFilter = 'all',
+  blockedUserIds = [],
   className = '',
 }) => {
   // Estado das abas
@@ -60,6 +78,26 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
   const [followingIds, setFollowingIds] = useState<string[]>(() =>
     liveService.getFollowingCreatorIds()
   );
+
+  // Estado sincronizado dos filtros de Lives preservado durante a navegação
+  const [filterCriteria, setFilterCriteria] = useState<DiscoveryAndLiveFilterCriteria>(() =>
+    getSavedLivesFilters()
+  );
+
+  useEffect(() => {
+    return subscribeLivesFilters((updated) => {
+      setFilterCriteria(updated);
+    });
+  }, []);
+
+  // Mapa rápido de perfis para exibir cidade/idade pública nos cartões
+  const creatorProfilesMap = useMemo(() => {
+    const map = new Map<string, (typeof INITIAL_PROFILES)[number]>();
+    for (const p of INITIAL_PROFILES) {
+      map.set(p.id.toLowerCase(), p);
+    }
+    return map;
+  }, []);
 
   // Metadados de proveniência de dados (Segurança e isolamento DEMO)
   const meta: DataSourceMeta = useMemo(() => liveService.getDataSourceMeta(), []);
@@ -115,32 +153,50 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
     }
   };
 
-  // Filtragem dos dados conforme a aba ativa
-  const { displayedSessions, isFollowingFallback } = useMemo(() => {
+  const handleApplyFilters = (nextCriteria: DiscoveryAndLiveFilterCriteria) => {
+    setSavedLivesFilters(nextCriteria);
+    setFilterCriteria(nextCriteria);
+  };
+
+  const handleClearFilters = () => {
+    const reset = resetSavedLivesFilters();
+    setFilterCriteria(reset);
+    if (searchQuery) {
+      setSearchQuery('');
+    }
+  };
+
+  // Filtragem dos dados conforme a aba ativa + filtros complementares (Sexo, Orientação, Idade, Localização)
+  const { tabSessions, isFollowingFallback } = useMemo(() => {
     let result: LiveSessionModel[] = [];
     let isFallback = false;
 
+    const formatFiltered =
+      formatFilter && formatFilter !== 'all'
+        ? sessions.filter((s) => s.format === formatFilter)
+        : sessions;
+
     switch (activeTab) {
       case 'ao_vivo':
-        result = sessions.filter((s) => s.status === 'active');
+        result = formatFiltered.filter((s) => s.status === 'active');
         break;
 
       case 'seguindo': {
-        const matches = sessions.filter(
+        const matches = formatFiltered.filter(
           (s) => s.status === 'active' && followingIds.includes(s.hostCreatorId)
         );
         if (matches.length > 0) {
           result = matches;
         } else {
           // Se o usuário ainda não segue ninguém com live ativa, apresenta seleção DEMO identificada
-          result = sessions.filter((s) => s.status === 'active').slice(0, 2);
+          result = formatFiltered.filter((s) => s.status === 'active').slice(0, 2);
           isFallback = true;
         }
         break;
       }
 
       case 'recomendadas':
-        result = [...sessions]
+        result = [...formatFiltered]
           .filter((s) => s.status === 'active')
           .sort((a, b) => {
             const pA = a.format === 'battle' ? 3 : a.format === 'challenge' ? 2 : 1;
@@ -153,9 +209,9 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
       case 'buscar': {
         const q = searchQuery.trim().toLowerCase();
         if (!q) {
-          result = sessions.filter((s) => s.status === 'active');
+          result = formatFiltered.filter((s) => s.status === 'active');
         } else {
-          result = sessions.filter((s) => {
+          result = formatFiltered.filter((s) => {
             const inTitle = s.title.toLowerCase().includes(q);
             const inCreator = s.hostCreatorName.toLowerCase().includes(q);
             const inCategory = s.category.toLowerCase().includes(q);
@@ -168,8 +224,15 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
       }
     }
 
-    return { displayedSessions: result, isFollowingFallback: isFallback };
-  }, [sessions, activeTab, followingIds, searchQuery]);
+    return { tabSessions: result, isFollowingFallback: isFallback };
+  }, [sessions, activeTab, followingIds, searchQuery, formatFilter]);
+
+  const filterResult = useMemo(
+    () => filterLiveSessions(tabSessions, filterCriteria, INITIAL_PROFILES, blockedUserIds),
+    [tabSessions, filterCriteria, blockedUserIds]
+  );
+
+  const displayedSessions = filterResult.filteredSessions;
 
   return (
     <div
@@ -290,6 +353,22 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
       </div>
 
       {/* ======================================================== */}
+      {/* 2.5 PAINEL DE FILTROS COMPLEMENTARES (LIVES E CRIADORES) */}
+      {/* ======================================================== */}
+      <div className="mb-6">
+        <DiscoveryLiveFilterPanel
+          context="lives"
+          appliedCriteria={filterCriteria}
+          appliedChips={filterResult.appliedChips}
+          resultsCount={displayedSessions.length}
+          totalAvailableCount={filterResult.totalAvailableBeforeFilter}
+          dataLimitationsNotice={filterResult.dataLimitationsNotice}
+          onApplyFilters={handleApplyFilters}
+          onClearFilters={handleClearFilters}
+        />
+      </div>
+
+      {/* ======================================================== */}
       {/* 3. CAMPO DE PESQUISA (QUANDO NA ABA BUSCAR)              */}
       {/* ======================================================== */}
       {activeTab === 'buscar' && (
@@ -394,31 +473,54 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
         </div>
       ) : displayedSessions.length === 0 ? (
         // Estado Vazio / Sem Resultados
-        <div className="rounded-2xl bg-slate-900/50 border border-slate-800/80 p-10 text-center max-w-md mx-auto">
+        <div
+          className="rounded-2xl bg-slate-900/50 border border-slate-800/80 p-10 text-center max-w-md mx-auto"
+          data-testid="lives-empty-filter-state"
+        >
           <Radio className="w-12 h-12 text-slate-600 mx-auto mb-3" />
           <h3 className="text-base font-bold text-white mb-1">
-            {activeTab === 'buscar' ? 'Nenhuma Live Encontrada' : 'Nenhuma Live Ativa Nesta Aba'}
+            {filterResult.isAnyFilterActive
+              ? 'Nenhuma Transmissão ou Criador Encontrado'
+              : activeTab === 'buscar'
+              ? 'Nenhuma Live Encontrada'
+              : 'Nenhuma Live Ativa Nesta Aba'}
           </h3>
-          <p className="text-xs text-slate-400 mb-4">
-            {activeTab === 'buscar'
+          <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+            {filterResult.isAnyFilterActive
+              ? 'Não há transmissões ao vivo que atendam simultaneamente aos filtros selecionados (sexo, orientação sexual, idade ou localização). Limpe ou amplie os filtros para visualizar todas as salas.'
+              : activeTab === 'buscar'
               ? `Nenhum resultado correspondente a "${searchQuery}". Tente pesquisar por outro termo ou categoria.`
               : 'Não há sessões ativas nesta categoria no momento.'}
           </p>
-          {activeTab === 'buscar' && searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="px-4 py-2 rounded-xl bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-600/50 text-xs font-bold transition-all cursor-pointer"
-            >
-              Limpar Busca
-            </button>
-          )}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {filterResult.isAnyFilterActive && (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                data-testid="lives-empty-clear-filters-btn"
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-lg shadow-cyan-950/40"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Limpar filtros</span>
+              </button>
+            )}
+            {activeTab === 'buscar' && searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="px-4 py-2.5 rounded-xl bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-600/50 text-xs font-bold transition-all cursor-pointer"
+              >
+                Limpar Busca
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         // Grade de Cartões de Lives (Mobile First: 1 col -> Tablet: 2 cols -> Desktop: 3 cols)
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {displayedSessions.map((session) => {
             const isFollowing = followingIds.includes(session.hostCreatorId);
+            const creatorProfile = creatorProfilesMap.get(session.hostCreatorId.toLowerCase());
 
             // Formatação do formato de transmissão
             const formatConfig = {
@@ -521,9 +623,19 @@ export const LiveCenter: React.FC<LiveCenterProps> = ({
                       <div className="min-w-0">
                         <h4 className="text-xs font-bold text-white truncate">
                           {session.hostCreatorName}
+                          {creatorProfile && !creatorProfile.hideAge && creatorProfile.age ? (
+                            <span className="ml-1 text-[10px] font-normal text-slate-400">
+                              • {creatorProfile.age}a
+                            </span>
+                          ) : null}
                         </h4>
-                        <p className="text-[10px] text-slate-400 truncate">
-                          {session.category || 'Transmissão Ao Vivo'}
+                        <p className="text-[10px] text-slate-400 truncate flex items-center gap-1">
+                          <span>{session.category || 'Transmissão Ao Vivo'}</span>
+                          {creatorProfile && !creatorProfile.hideCity && creatorProfile.city ? (
+                            <span className="inline-flex items-center gap-0.5 text-cyan-300/90">
+                              • <MapPin className="w-2.5 h-2.5 inline" /> {creatorProfile.city}
+                            </span>
+                          ) : null}
                         </p>
                       </div>
                     </div>

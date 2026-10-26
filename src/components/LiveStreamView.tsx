@@ -486,7 +486,11 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
           </div>
         </div>
       ) : (
-        <LiveCenter onSelectLive={handleOpenSession} />
+        <LiveCenter
+          onSelectLive={handleOpenSession}
+          formatFilter={activeFormatTab === 'all' ? 'all' : activeFormatTab}
+          blockedUserIds={blockedUserIds}
+        />
       )}
 
       {/* ERRO DE TRANSMISSÃO TOAST / ALERTA */}

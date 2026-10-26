@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Heart,
   X,
@@ -12,9 +12,19 @@ import {
   Flame,
   MessageCircle,
   Filter,
+  RotateCcw,
 } from 'lucide-react';
 import { Profile, UserProfileData } from '../../types';
 import { calculateAiCompatibility } from '../../utils/aiMatchmaking';
+import { DiscoveryLiveFilterPanel } from '../DiscoveryLiveFilterPanel';
+import {
+  DiscoveryAndLiveFilterCriteria,
+  filterDiscoverProfiles,
+  getSavedDiscoverFilters,
+  setSavedDiscoverFilters,
+  resetSavedDiscoverFilters,
+  subscribeDiscoverFilters,
+} from '../../utils/discoveryAndLiveFilters';
 
 interface Screen09DiscoverProps {
   profiles: Profile[];
@@ -40,11 +50,44 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
   const [interestModalOpen, setInterestModalOpen] = useState(false);
   const [interestMessage, setInterestMessage] = useState('');
 
-  const currentProfile = profiles[currentIndex] || null;
+  // Estado dos filtros preservado durante a navegação
+  const [filterCriteria, setFilterCriteria] = useState<DiscoveryAndLiveFilterCriteria>(() =>
+    getSavedDiscoverFilters()
+  );
+
+  useEffect(() => {
+    return subscribeDiscoverFilters((updated) => {
+      setFilterCriteria(updated);
+    });
+  }, []);
+
+  const filterResult = useMemo(
+    () => filterDiscoverProfiles(profiles, filterCriteria),
+    [profiles, filterCriteria]
+  );
+
+  const displayedProfiles = filterResult.filteredProfiles;
+  const safeIndex =
+    displayedProfiles.length > 0 ? Math.min(currentIndex, displayedProfiles.length - 1) : 0;
+  const currentProfile = displayedProfiles[safeIndex] || null;
+
+  const handleApplyFilters = (nextCriteria: DiscoveryAndLiveFilterCriteria) => {
+    setSavedDiscoverFilters(nextCriteria);
+    setFilterCriteria(nextCriteria);
+    setCurrentIndex(0);
+    setCurrentPhotoIndex(0);
+  };
+
+  const handleClearFilters = () => {
+    const reset = resetSavedDiscoverFilters();
+    setFilterCriteria(reset);
+    setCurrentIndex(0);
+    setCurrentPhotoIndex(0);
+  };
 
   const handleNextCard = () => {
     setCurrentPhotoIndex(0);
-    setCurrentIndex((prev) => (prev + 1 < profiles.length ? prev + 1 : 0));
+    setCurrentIndex((prev) => (prev + 1 < displayedProfiles.length ? prev + 1 : 0));
   };
 
   const handleLike = () => {
@@ -69,20 +112,71 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
 
   if (!currentProfile) {
     return (
-      <div className="max-w-md mx-auto px-4 py-16 text-center space-y-4">
-        <div className="w-16 h-16 mx-auto rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
-          <Flame className="w-8 h-8" />
+      <div className="max-w-md mx-auto px-4 py-4">
+        {/* Top Filter Bar & Panel */}
+        <div className="flex items-center justify-between mb-2 px-1">
+          <div className="flex items-center gap-1.5 text-xs text-slate-300">
+            <Flame className="w-4 h-4 text-rose-500 fill-current" />
+            <span className="font-bold text-white">Descoberta JOBS</span>
+            <span className="text-[11px] text-slate-400">(0 de {displayedProfiles.length})</span>
+          </div>
+          <button
+            onClick={onOpenPreferences}
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            title="Filtros e Preferências"
+          >
+            <Filter className="w-4 h-4" />
+          </button>
         </div>
-        <h2 className="text-xl font-display font-bold text-white">Você viu todos os perfis por enquanto!</h2>
-        <p className="text-xs text-slate-400">
-          Ajuste suas preferências de busca para encontrar mais conexões em outras regiões ou faixas etárias.
-        </p>
-        <button
-          onClick={onOpenPreferences}
-          className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold cursor-pointer"
+
+        <DiscoveryLiveFilterPanel
+          context="discover"
+          appliedCriteria={filterCriteria}
+          appliedChips={filterResult.appliedChips}
+          resultsCount={displayedProfiles.length}
+          totalAvailableCount={filterResult.totalAvailableBeforeFilter}
+          dataLimitationsNotice={filterResult.dataLimitationsNotice}
+          onApplyFilters={handleApplyFilters}
+          onClearFilters={handleClearFilters}
+        />
+
+        <div
+          className="px-4 py-12 text-center space-y-4 rounded-3xl bg-[#10101a] border border-white/10 mt-3"
+          data-testid="discover-empty-results"
         >
-          Ajustar Preferências
-        </button>
+          <div className="w-16 h-16 mx-auto rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+            <Flame className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-display font-bold text-white">
+            {filterResult.isAnyFilterActive
+              ? 'Nenhum perfil encontrado para os filtros aplicados'
+              : 'Você viu todos os perfis por enquanto!'}
+          </h2>
+          <p className="text-xs text-slate-400">
+            {filterResult.isAnyFilterActive
+              ? 'Não encontramos perfis que correspondam simultaneamente aos critérios selecionados. Limpe os filtros ou ajuste sua busca.'
+              : 'Ajuste suas preferências de busca para encontrar mais conexões em outras regiões ou faixas etárias.'}
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {filterResult.isAnyFilterActive && (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                data-testid="discover-empty-clear-filters-btn"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white text-xs font-bold cursor-pointer inline-flex items-center gap-1.5 shadow-lg"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Limpar filtros</span>
+              </button>
+            )}
+            <button
+              onClick={onOpenPreferences}
+              className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold cursor-pointer"
+            >
+              Ajustar Preferências
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -94,11 +188,13 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
   return (
     <div className="max-w-md mx-auto px-4 py-2">
       {/* Top Filter Bar */}
-      <div className="flex items-center justify-between mb-3 px-1">
+      <div className="flex items-center justify-between mb-2 px-1">
         <div className="flex items-center gap-1.5 text-xs text-slate-300">
           <Flame className="w-4 h-4 text-rose-500 fill-current" />
           <span className="font-bold text-white">Descoberta JOBS</span>
-          <span className="text-[11px] text-slate-400">({currentIndex + 1} de {profiles.length})</span>
+          <span className="text-[11px] text-slate-400">
+            ({safeIndex + 1} de {displayedProfiles.length})
+          </span>
         </div>
         <button
           onClick={onOpenPreferences}
@@ -108,6 +204,18 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
           <Filter className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Painel Complementar de Filtros (Sexo, Orientação Sexual, Idade e Localização) */}
+      <DiscoveryLiveFilterPanel
+        context="discover"
+        appliedCriteria={filterCriteria}
+        appliedChips={filterResult.appliedChips}
+        resultsCount={displayedProfiles.length}
+        totalAvailableCount={filterResult.totalAvailableBeforeFilter}
+        dataLimitationsNotice={filterResult.dataLimitationsNotice}
+        onApplyFilters={handleApplyFilters}
+        onClearFilters={handleClearFilters}
+      />
 
       {/* Main Profile Card */}
       <div className="relative aspect-[3/4] sm:aspect-[4/5] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-950 group select-none">

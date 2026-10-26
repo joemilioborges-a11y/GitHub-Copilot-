@@ -121,6 +121,9 @@ export interface Profile {
   userReviewText?: string;
   isBoosted?: boolean;
   boostExpiresAt?: string;
+  hideAge?: boolean;
+  hideCity?: boolean;
+  hideSexualOrientation?: boolean;
 }
 
 export interface UserProfileData {

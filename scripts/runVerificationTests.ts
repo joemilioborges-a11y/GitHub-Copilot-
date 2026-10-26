@@ -320,6 +320,38 @@ async function main() {
     }
   }
 
+  console.log('\n========================================================================');
+  console.log('JOBS — 7 TESTES OBRIGATÓRIOS: FILTROS COMPLEMENTARES EM DESCOBERTAS & LIVES');
+  console.log('========================================================================\n');
+
+  const { runDiscoveryAndLiveFiltersTestSuite } = await import('../src/services/__tests__/discoveryAndLiveFilters.test');
+  const dlFiltersSummary = await runDiscoveryAndLiveFiltersTestSuite();
+
+  for (const t of dlFiltersSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — 6 TESTES OBRIGATÓRIOS: RELATÓRIO FINANCEIRO DE RECEITAS & GANHOS (70/30)');
+  console.log('========================================================================\n');
+
+  const { runRevenueAndEarningsReportTestSuite } = await import('../src/services/__tests__/revenueAndEarningsReport.test');
+  const revReportSummary = await runRevenueAndEarningsReportTestSuite();
+
+  for (const t of revReportSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
   const grandTotal =
     summary.totalTests +
     withdrawalSummary.total +
@@ -337,7 +369,9 @@ async function main() {
     adminAuditSummary.total +
     fbTests.length +
     monthlyRecSummary.total +
-    vrSimSummary.total;
+    vrSimSummary.total +
+    dlFiltersSummary.total +
+    revReportSummary.total;
   const grandPassed =
     summary.passedCount +
     withdrawalSummary.passed +
@@ -355,7 +389,9 @@ async function main() {
     adminAuditSummary.passed +
     fbPassed +
     monthlyRecSummary.passed +
-    vrSimSummary.passed;
+    vrSimSummary.passed +
+    dlFiltersSummary.passed +
+    revReportSummary.passed;
   const grandFailed =
     summary.failedCount +
     withdrawalSummary.failed +
@@ -373,14 +409,16 @@ async function main() {
     adminAuditSummary.failed +
     fbFailed +
     monthlyRecSummary.failed +
-    vrSimSummary.failed;
+    vrSimSummary.failed +
+    dlFiltersSummary.failed +
+    revReportSummary.failed;
 
   console.log('\n========================================================================');
   console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
   console.log(`Total de Casos de Teste: ${grandTotal}`);
   console.log(`Aprovados:              ${grandPassed} (${((grandPassed / grandTotal) * 100).toFixed(1)}%)`);
   console.log(`Falhas:                 ${grandFailed}`);
-  console.log(`Tempo Total:            ${summary.executionDurationMs + contentUnlockSummary.executionDurationMs + auditSummary.durationMs + execFinancialSummary.durationMs + monthlyRecSummary.durationMs + vrSimSummary.durationMs}ms`);
+  console.log(`Tempo Total:            ${summary.executionDurationMs + contentUnlockSummary.executionDurationMs + auditSummary.durationMs + execFinancialSummary.durationMs + monthlyRecSummary.durationMs + vrSimSummary.durationMs + dlFiltersSummary.durationMs + revReportSummary.durationMs}ms`);
   console.log('========================================================================\n');
 
   if (grandFailed > 0) {

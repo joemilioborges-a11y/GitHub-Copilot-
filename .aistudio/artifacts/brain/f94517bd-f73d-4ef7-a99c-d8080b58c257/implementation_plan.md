@@ -1,160 +1,129 @@
-# JOBS — Plano Técnico Priorizado de Evolução (Fases 0 a 11)
+# JOBS — Relatório Financeiro de Receitas e Geração de Ganhos
 
-Plano de arquitetura e engenharia para a evolução incremental da plataforma **JOBS 1.0** para um ecossistema global de relacionamentos, encontros e conexões autênticas, preservando integralmente o código existente, a integridade contábil do `financialLedger`, os fluxos de transmissão ao vivo com overlays interativos e a suite de 98 testes automatizados.
+Complemento analítico e auditável integrado ao painel administrativo central (`CentralAdminDashboardModal`), apresentando a composição de receitas por serviço, comparativo de entradas e estornos, reconciliação financeira exata e rastreabilidade até as transações de origem no livro-razão sem alterar funcionalidades existentes.
 
 ---
 
-## 1. Visão Geral da Arquitetura & Diretrizes Fundamentais
+### User Review & Critical Decisions
 
-### 1.1 Princípios Inegociáveis
-1. **Preservação e Não Regressão**: Nenhuma tela (`Screen01Landing` a `Screen18ReportsBlocks`), serviço contábil (`financialLedger`), motor de live (`FloatingHeartsOverlay`, `GiftAnimationOverlay`, `LivePopularityIndicator`) ou teste existente será descontinuado ou substituído.
-2. **Ledger Único e Isomórfico**: O `src/services/ledgerService.ts` com cadeia criptográfica SHA-256 e partilha 70/30 continua sendo a única fonte de verdade contábil.
-3. **Transparência e Anti-Farsa**: Nenhum perfil falso, curtidas artificiais de robôs, mensagens fabricadas ou promessas enganosas de algoritmos de afinidade.
-4. **Segurança e Privacidade (LGPD/GDPR)**: Minimização de dados, age-gate estrito de 18+ anos, isolamento de credenciais e exportação/exclusão de dados em conformidade legal.
-5. **Acessibilidade e Ergonomia Touch-First**: Em conformidade com o design system para mobile touch (zonas ergonômicas de polegar, área de toque mínima de $44 \times 44\text{px}$, suporte a `prefers-reduced-motion` e contrastes WCAG AA).
+> [!IMPORTANT]
+> **Decisões de Produto e Arquitetura (Defaults Recomendados Aplicados)**
+> - **Posicionamento no Painel Administrativo**: O relatório será disponibilizado como uma nova sub-aba dedicada (**"Relatório de Receitas & Geração de Ganhos"**) dentro da seção **Carteira e Créditos** e contará com um botão de acesso direto na seção **Visão Geral**, preservando 100% das abas e componentes existentes.
+> - **Fonte Contábil e Isolamento de Ambientes**: O relatório permitirá alternar entre o **Livro-Razão Contábil Oficial (`financialLedger`)** e o **Livro-Razão Isolado do Simulador VR (`vrSimulatorService`)**, nunca misturando transações de origens distintas nem tratando créditos virtuais (`CREDITS`) como moeda fiduciária (`BRL`).
+
+---
+
+### 1. Overview & Core Concept
+
+- **What It Does**: Fornece uma visão contábil e executiva completa das receitas por serviço do JOBS, distinguindo claramente o fluxo de caixa bruto (venda de pacotes de créditos em `BRL`), as transações de consumo elegíveis à divisão **70% criador / 30% JOBS** (Desbloqueios de Cofre/Mídia VIP, Desbloqueios de Transmissões Ao Vivo, Presentes Virtuais em Lives e Assinaturas/Desafios), os estornos contabilizados, as obrigações com criadores, os repasses liquidados, as taxas registradas e o caixa disponível reconciliado.
+- **Target Audience / Persona**: Administradores financeiros e auditores da plataforma JOBS que necessitam verificar a origem de cada centavo recebido, a aplicação estrita da regra 70/30 apenas sobre serviços elegíveis e a conciliação matemática com o livro-razão.
+- **Key Value**: Elimina dupla contagem entre compra de créditos e consumo de serviços, impede que créditos virtuais sejam somados como dinheiro real e permite inspecionar a lista exata de transações (`id`, `transactionId`, `idempotencyKey`, `timestamp`, `entryHash`) que compõem cada fatia ou barra dos gráficos.
+
+---
+
+### 2. User Experience & Visual Design
+
+- **Key User Flows**:
+  1. **Acesso e Seleção de Escopo**: No `CentralAdminDashboardModal`, o administrador acessa o relatório pela aba **Carteira e Créditos → Receitas & Geração de Ganhos** (ou pelo atalho na **Visão Geral**), escolhe o período temporal (`Hoje`, `7 Dias`, `30 Dias`, `Todo o Histórico` ou `Período Sem Dados` para validação de vazio) e a fonte contábil (`Livro-Razão Oficial` vs `Sandbox VR 30 Dias`).
+  2. **Inspeção do Gráfico de Pizza (Composição de Receitas por Serviço)**: Visualiza a participação percentual e monetária (`BRL`) de cada serviço elegível, acompanhada de uma tabela lateral de precisão tabular (`tabular-nums`) exibindo Receita Bruta Confirmada, Estornos/Cancelamentos, Receita Líquida Reconhecida, Parcela do Criador (70%), Comissão JOBS (30%) e Quantidade de Transações.
+  3. **Inspeção do Gráfico de Barras (Entradas Financeiras vs Estornos e Obrigações)**: Analisa lado a lado, por categoria de serviço (incluindo Entrada de Caixa de Pacotes de Créditos separada das categorias de consumo 70/30), os Valores Recebidos e Confirmados, Estornos Separados, Receita Líquida, Obrigações com Criadores e Impacto no Caixa.
+  4. **Drill-Down de Auditoria Histórica**: Ao clicar em qualquer serviço no gráfico ou na tabela de detalhamento, abre a gaveta/painel de **Rastreabilidade de Transações de Origem**, listando cada lançamento contábil original com data/hora real, identificador, chave de idempotência, contas de débito/crédito e hash SHA-256.
+  5. **Painel de Reconciliação Financeira**: Confere os 7 indicadores reconciliáveis (Total Recebido, Total Estornado, Receita Líquida Reconhecida, Obrigações Pendentes com Criadores, Pagamentos Efetuados, Taxas Efetivamente Registradas e Saldo Disponível do JOBS), com exibição transparente de `"Dados insuficientes"` e explicação técnica caso algum indicador não possua cobertura no período selecionado.
+
+- **Visual Identity & Theme**:
+  - *Aesthetic Direction*: Console financeiro executivo de alta densidade e precisão contábil, alinhado à estética escura do painel administrativo JOBS.
+  - *Color Palette & Mood*: Superfície neutra escura (`#0A0A10` / `#0F172A`), bordas estruturais sutis de `1px` (`border-slate-800`), e cores semânticas estritas para séries financeiras:
+    - Verde Esmeralda (`#10B981`): Receita líquida reconhecida e conciliação íntegra.
+    - Ciano (`#06B6D4`): Entrada bruta confirmada e caixa custodiado.
+    - Âmbar (`#F59E0B`): Comissão JOBS (30%) e reservas em processamento.
+    - Violeta (`#8B5CF6`): Repasse devido aos criadores (70%).
+    - Rosa/Carmesim (`#F43F5E`): Estornos, cancelamentos e reversões.
+  - *Typography & Hierarchy*: Títulos nítidos sem prefixos mecânicos, metadados limpos separados por `·` e disciplina estrita de algarismos tabulares (`font-mono tabular-nums`) em todos os valores em `BRL`, contadores, percentuais e timestamps.
+  - *Component Styling & Layout*: Layout de elevação única (`border border-slate-800 bg-slate-900/80 rounded-2xl`), sem cartões aninhados excessivos nem bordas laterais grossas, priorizando tabelas de alta densidade e gráficos Recharts responsivos.
+
+---
+
+### 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: Segregação Estrita entre Entrada de Caixa (`CREDIT_PURCHASE`) e Receita Elegível 70/30 (`CONTENT_UNLOCK`, `TIP_GIFT`, `SUBSCRIPTION_PURCHASE`)**
+  - *Chosen Approach*: Compras de pacotes de créditos são contabilizadas como **Recebimento Bruto de Caixa (Escrow/Float)** e **não** sofrem divisão 70/30 no momento da compra. A divisão **70% criador / 30% JOBS** é aplicada exclusivamente quando o usuário consome créditos em serviços elegíveis de criadores.
+  - *Why*: Impede dupla contagem de receita e respeita fielmente o modelo contábil de partidas dobradas já implementado no `ledgerService`.
+  - *Alternatives Considered*: Aplicar 70/30 sobre a venda de pacotes foi descartado porque no momento da compra do pacote ainda não há criador destinatário nem serviço prestado.
+
+- **Decision 2: Cálculo do Saldo Disponível do JOBS pela Equação de Caixa Custodiado (Não por Soma Simples de Comissões)**
+  - *Chosen Approach*: O saldo de caixa disponível do JOBS é derivado dos registros reais de entrada fiduciária confirmada menos estornos fiduciários, menos repasses liquidados aos criadores (`PAYOUT_SETTLED` / `released`), menos taxas efetivamente registradas (`feeBrl`) e segregado das obrigações pendentes com criadores (`CREATOR_PENDING_BRL` + `CREATOR_AVAILABLE_BRL`).
+  - *Why*: Atende estritamente à regra da Fase 4 ("Não calcular o caixa disponível simplesmente somando comissões. Não somar novamente transações já contabilizadas. Não utilizar créditos virtuais como dinheiro real").
+
+- **Decision 3: Transparência para Indicadores sem Dados (`"Dados insuficientes"`)**
+  - *Chosen Approach*: Quando um filtro de período não possui transações ou quando uma categoria/taxa não apresenta registros confirmados no intervalo selecionado, o indicador exibe explicitamente `"Dados insuficientes"` acompanhado da justificativa contábil, sem inventar valores nem repetir saldos atuais em datas passadas.
+
+---
+
+### 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+- **Architecture & Component Diagram**:
 
 ```
-                      +-------------------------------------------------------+
-                      |                 JOBS 1.0 ECOSSISTEMA                   |
-                      +-------------------------------------------------------+
-                                                  |
-         +----------------------------------------+----------------------------------------+
-         |                                        |                                        |
-+--------------------+                  +--------------------+                  +--------------------+
-|  Core Dating & UX  |                  | Real-Time & Media  |                  | Finance & Auditing |
-|  (18 Screens Flow) |                  | (Lives & WebRTC)   |                  | (Double-Entry LED) |
-+--------------------+                  +--------------------+                  +--------------------+
-| • Landing & Auth   |                  | • LiveStreamView   |                  | • ledgerService.ts |
-| • Profile Wizard   |                  | • FloatingHearts   |                  | • 70/30 Split Rule |
-| • Discovery Cards  |                  | • GiftOverlay      |                  | • AuditLedgerReport|
-| • Mutual Matches   |                  | • PopularityGauge  |                  | • UnlockAuditPanel |
-| • Chat & Safety    |                  | • Real WebRTC Call |                  | • PlatformExecutive|
-+--------------------+                  +--------------------+                  +--------------------+
-         |                                        |                                        |
-         +----------------------------------------+----------------------------------------+
-                                                  |
-                      +-------------------------------------------------------+
-                      |         CENTRAL ADMIN DASHBOARD & ROADMAP TRACKER     |
-                      |   • Live Monitor  • Financial Exec  • 11-Phase Audit  |
-                      +-------------------------------------------------------+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                        CentralAdminDashboardModal                          │
+│  ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │ Seção: Visão Geral (Atalho KPI)  │  │ Seção: Carteira e Créditos     │  │
+│  └────────────────┬─────────────────┘  └───────────────┬────────────────┘  │
+│                   └─────────────────┬──────────────────┘                   │
+│                                     ▼                                      │
+│              ┌──────────────────────────────────────────────┐              │
+│              │        RevenueAndEarningsReportPanel         │              │
+│              │  • Filtro de Período (Hoje/7d/30d/Todos)     │              │
+│              │  • Seletor de Fonte (Razão Oficial / VR)     │              │
+│              ├──────────────────────┬───────────────────────┤              │
+│              │ Gráfico de Pizza     │ Gráfico de Barras     │              │
+│              │ (Recharts PieChart)  │ (Recharts BarChart)   │              │
+│              │ Composição Elegível  │ Bruto vs Estornos vs  │              │
+│              │ + Split 70% / 30%    │ Líquido vs Obrigações │              │
+│              ├──────────────────────┴───────────────────────┤              │
+│              │ Painel de Reconciliação Financeira (7 KPIs)  │              │
+│              ├──────────────────────────────────────────────┤              │
+│              │ Gaveta/Tabela de Rastreabilidade Histórica   │              │
+│              │ (Transações de Origem, Idempotência e Hash)  │              │
+│              └──────────────────────┬───────────────────────┘              │
+└─────────────────────────────────────┼──────────────────────────────────────┘
+                                      ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│             Motor de Agregação e Reconciliação (ledgerService)             │
+│  • Agrupa LedgerEntry por transactionId / idempotencyKey sem duplicidade   │
+│  • Classifica serviços reais:                                              │
+│    1. Desbloqueio de Conteúdo / Cofre VIP (Elegível 70/30)                 │
+│    2. Desbloqueio de Transmissão Ao Vivo VIP (Elegível 70/30)              │
+│    3. Presentes Virtuais e Gorjetas em Lives (Elegível 70/30)              │
+│    4. Assinaturas e Desafios VIP (Elegível 70/30)                          │
+│    5. Venda de Pacotes de Créditos (Entrada de Caixa BRL — Sem 70/30)      │
+│    6. Recompensas / Ajustes Administrativos (100% Alocado — Sem 30% JOBS)  │
+│  • Concilia PayoutRecord (pagamentos liquidados e taxas feeBrl reais)      │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+- **Data Model & State**:
+  - **Agrupamento por Serviço (`ServiceRevenueBreakdownItem`)**:
+    - `serviceKey`: `'vault_unlock' | 'live_unlock' | 'live_gifts' | 'subscriptions' | 'credit_packages_cash_in' | 'creator_rewards_adjustments'`
+    - `serviceLabel`: nome real auditado do serviço no sistema.
+    - `isEligibleFor70_30`: `boolean` indicando se aplica a regra 70% criador / 30% JOBS.
+    - `grossConfirmedBrl`: valor bruto confirmado em `BRL` (centavos convertidos com precisão).
+    - `refundedBrl`: estornos e cancelamentos contabilizados na categoria.
+    - `netRevenueBrl`: receita líquida reconhecida (`grossConfirmedBrl - refundedBrl`).
+    - `creatorShareBrl`: parcela de 70% devida ao criador (ou `null` quando não aplicável à categoria, como na entrada bruta de pacotes não consumidos).
+    - `platformCommissionBrl`: comissão de 30% do JOBS (ou `null` quando não aplicável).
+    - `transactionsCount`: quantidade de transações únicas deduplicadas por chave de idempotência/transação.
+    - `originTransactions`: lista rastreável das transações originais (`transactionId`, `timestamp`, `actorId`, `targetCreatorId`, `grossBrl`, `refundedBrl`, `netBrl`, `creatorShareBrl`, `platformShareBrl`, `status`, `idempotencyKey`, `entryIds`, `entryHashes`).
+  - **Indicadores de Reconciliação (`FinancialReconciliationSummary`)**:
+    - `totalReceivedBrl`: entradas fiduciárias confirmadas + consumo econômico auditado sem dupla soma.
+    - `totalRefundedBrl`: total de estornos e reversões registradas.
+    - `netRecognizedRevenueBrl`: receita líquida reconhecida pelas regras contábeis.
+    - `pendingCreatorObligationsBrl`: saldo pendente + disponível ainda não sacado pelos criadores (`CREATOR_PENDING_BRL` + `CREATOR_AVAILABLE_BRL`).
+    - `settledCreatorPayoutsBrl`: repasses efetivamente liquidados (`released` / `PAYOUT_SETTLED`).
+    - `recordedFeesBrl`: taxas bancárias/operacionais efetivamente registradas nos registros de pagamento (`PayoutRecord.feeBrl`); exibe status `"insufficient_data"` com explicação caso não existam taxas aplicáveis no período.
+    - `availablePlatformCashBrl`: saldo de caixa disponível do JOBS reconciliado a partir do caixa real custodiado, deduzindo estornos, repasses pagos, taxas e obrigações retidas de criadores.
 
-## 2. Roteiro de Execução em 11 Fases Priorizadas
-
-### Fase 0 — Governança, Ambientes e Base de Execução
-- **Objetivo**: Mapear inventário completo dos ativos técnicos, assegurar pipelines de verificação local e estruturar rastreamento de fases.
-- **Entregáveis**:
-  - Inventário formal de componentes, rotas e dependências.
-  - Script unificado de verificação contínua (`npm test`, `npm run build`, `npm run lint`).
-  - Painel interativo de Governança e Evolução dentro do `CentralAdminDashboardModal`.
-- **Critérios de Aceitação**: Suite de testes com 100% de aprovação e sem avisos de compilação TypeScript.
-
-### Fase 1 — Auditoria Funcional, Técnica e de Segurança
-- **Objetivo**: Mapear a conformidade de dados, vetores de vulnerabilidade, políticas de LGPD e dependências de terceiros.
-- **Entregáveis**:
-  - Matriz de segurança cobrindo autenticação, sanitização de inputs de chat e cabeçalhos de segurança.
-  - Auditoria de dados sensíveis e conformidade com anonimização de IP e geolocalização aproximada.
-- **Critérios de Aceitação**: Nenhuma credencial em texto puro; geolocalização restrita a raio por cidade/bairro.
-
-### Fase 2 — Estabilização, Correções e Fundação Técnica
-- **Objetivo**: Endurecer o tratamento de falhas em rede, paginação de mensagens e resiliência offline do feed e chats.
-- **Entregáveis**:
-  - Interceptors e tratadores de erro resilientes com retry exponencial em chamadas de API.
-  - Paginação cursor-based para feeds de descoberta e históricos de mensagens.
-- **Critérios de Aceitação**: App mantém estado íntegro em caso de oscilação de conectividade sem crashes.
-
-### Fase 3 — Identidade, Cadastro e Perfil
-- **Objetivo**: Aprimorar o fluxo de onboarding com verificação de maioridade (18+), selo opcional de autenticidade e wizard guiado de perfil.
-- **Entregáveis**:
-  - Age-gate com validação de data de nascimento e termo formal de maioridade.
-  - Fluxo de verificação fotográfica (selfie liveness opcional) com selo de verificado no perfil.
-  - Seletor de interesses categorizados, estilos de vida e preferências relacionais.
-- **Critérios de Aceitação**: Usuários menores de 18 anos são impedidos no cliente e no servidor.
-
-### Fase 4 — Descoberta e Compatibilidade Explicável
-- **Objetivo**: Mecanismo de recomendação baseado em interesses em comum, proximidade geográfica e afinidade declarada, com explicabilidade ética.
-- **Entregáveis**:
-  - Motor de matching transparente com tags explicativas (ex: *"Vocês dois amam trilhas e jazz"*).
-  - Filtros avançados com ordenação por afinidade real, sem indução de escassez artificial.
-- **Critérios de Aceitação**: O card de perfil exibe o índice de compatibilidade com justificativa legível.
-
-### Fase 5 — Conexões, Mensagens e Notificações Éticas
-- **Objetivo**: Mensagens 1:1 desbloqueadas exclusivamente por interesse mútuo (*Match*), com anti-spam e consentimento contínuo.
-- **Entregáveis**:
-  - Chat seguro em tempo real com indicador de digitação, confirmação de leitura opt-in e bloqueio imediato.
-  - Moderação ativa contra compartilhamento indevido de links e comportamentos abusivos.
-- **Critérios de Aceitação**: Usuários só podem trocar mensagens diretas após consentimento mútuo.
-
-### Fase 6 — Confiança, Segurança e Moderação
-- **Objetivo**: Ferramental robusto de denúncias, triagem administrativa de segurança e consentimento explícito.
-- **Entregáveis**:
-  - Central de Denúncias no Admin com histórico, categorização e ações de suspensão preventiva.
-  - Painel de Gestão de Consentimentos e Direitos do Titular (LGPD/GDPR: exportação e esquecimento).
-- **Critérios de Aceitação**: Denúncias entram em fila prioritária no painel administrativo com trilha de auditoria.
-
-### Fase 7 — Chamadas de Vídeo em Tempo Real (WebRTC)
-- **Objetivo**: Chamadas de vídeo ponta a ponta com consentimento recíproco, controles de câmera/microfone e sem falsas transmissões simuladas.
-- **Entregáveis**:
-  - Módulo WebRTC nativo com fallback de áudio e visualização de sinalização P2P.
-  - Botão de pânico e encerramento com um toque com opção de bloqueio pós-chamada.
-- **Critérios de Aceitação**: Conexão peer-to-peer real com controle de permissão e sem falsas simulações.
-
-### Fase 8 — Monetização, Planos e Livro-Razão Multi-Moedas
-- **Objetivo**: Planos Free, Premium e VIP integrados com clareza contábil no livro-razão 70/30 já existente.
-- **Entregáveis**:
-  - Tabela de planos com benefícios transparentes (destaques, filtros expandidos, presentes de lives).
-  - Lançamentos no `financialLedger` diferenciando receita líquida da plataforma, impostos e obrigações.
-- **Critérios de Aceitação**: Cada assinatura ou desbloqueio gera evento no ledger mantendo a integridade SHA-256.
-
-### Fase 9 — Crescimento, Retenção Ética e Internacionalização
-- **Objetivo**: Preparação multi-idioma (Português, Inglês, Espanhol), conversão de moedas (BRL, USD, EUR) e notificações respeitosas.
-- **Entregáveis**:
-  - Sistema de internacionalização (i18n) modular.
-  - Notificações baseadas em eventos reais de usuários reais.
-- **Critérios de Aceitação**: Troca instantânea de idioma e moeda sem perda de estado ou reinicialização.
-
-### Fase 10 & 11 — Painel Administrativo, Observabilidade, Qualidade e Lançamento
-- **Objetivo**: Painel consolidado com métricas de produto (DAU/MAU, retenção, liquidez contábil), testes de carga e checklist final de homologação.
-- **Entregáveis**:
-  - Dashboard Executivo unificado conectando métricas operacionais, segurança e finanças.
-  - Relatório final de conformidade para auditoria externa.
-- **Critérios de Aceitação**: Todos os indicadores reconciliados e suite de testes com 100% de sucesso.
-
----
-
-## 3. Alterações Propostas no Código (File-by-File)
-
-### 3.1 Novos Módulos de Governança e Evolução
-- **`src/types/evolutionRoadmap.ts`**: Definição das interfaces de estado, marcos, evidências de testes e itens de auditoria para cada uma das 11 fases.
-- **`src/services/evolutionRoadmapService.ts`**: Serviço para persistência de estado das fases, coleta de métricas de cobertura de código e auditoria de conformidade.
-- **`src/components/admin/EvolutionRoadmapPanel.tsx`**: Componente visual moderno e responsivo, integrado como nova aba no `CentralAdminDashboardModal`, permitindo aos administradores inspecionar o progresso das 11 fases, auditar critérios de aceitação e verificar relatórios de conformidade.
-
-### 3.2 Extensão Segura do Dashboard Administrativo
-- **`src/components/admin/CentralAdminDashboardModal.tsx`**: Adição da aba `"evolution"` ("Evolução 11 Fases") sem alterar as abas existentes (`overview`, `liveMonitor`, `financialExec`, `unlockAudit`, `securityAudits`).
-
-### 3.3 Suíte de Testes e Verificação
-- **`src/services/__tests__/evolutionRoadmapService.test.ts`**: Testes automatizados para garantir validação de regras de transição de fase, persistência de evidências e integridade dos critérios de aceitação.
-- **`scripts/runVerificationTests.ts`**: Inclusão dos novos testes na suíte de homologação contínua.
-
----
-
-## 4. Plano de Verificação e Evidências
-
-### 4.1 Testes Automatizados
-```bash
-# Executar a suíte de testes de integridade contábil e de componentes
-npm test
-
-# Validação estrita do compilador TypeScript
-npm run lint
-
-# Verificação de build de produção
-npm run build
-```
-
-### 4.2 Verificação Manual e Critérios de Aceitação
-1. **Navegação no Painel**: Abrir a Central do Administrador pelo menu principal ou botão de atalho e selecionar a aba "Evolução 11 Fases".
-2. **Auditoria das Fases**: Inspecionar os detalhes das Fases 0 a 11, verificando os critérios cumpridos, os marcos planejados e a ausência de simulações enganosas.
-3. **Não-Regressão**: Navegar pelas telas de Descoberta, Chat, Lives com corações flutuantes, presentes animados e painéis financeiros (`PlatformFinancialExecutive` e `LiveUnlockAuditPanel`), confirmando a operação contínua e sem erros.
+- **Interactive Component & State Mapping**:
+  - **Seletores de Período**: Filtragem cronológica real pelo `timestamp` ISO de cada `LedgerEntry` (`today`, `7days`, `30days`, `all`, além de filtro de data customizada para inspecionar intervalos específicos ou períodos sem movimento).
+  - **Interação nos Gráficos e Tabelas**: Clicar em uma fatia do Gráfico de Pizza, em uma barra do Gráfico de Barras ou no botão `"Ver transações de origem"` filtra imediatamente a tabela inferior de auditoria para exibir apenas os lançamentos que compõem aquele total.
+  - **Verificação de Duplicidade e Integridade**: Indicador de paridade matemática validando em tempo real que `Receita Líquida Elegível === Parcela Criadores (70%) + Comissão JOBS (30%)` e que nenhuma chave de idempotência foi contabilizada em duplicidade.

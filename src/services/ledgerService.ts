@@ -10,6 +10,11 @@
  * - Identificação estrita de ambiente de testes (isSandbox: true).
  */
 import { adminAuditService } from './adminAuditService';
+import {
+  buildOfficialLedgerRevenueReport,
+  RevenueReportPeriodFilter,
+  RevenueAndEarningsReportResult,
+} from '../utils/revenueAndEarningsReport';
 
 export type AccountCurrency = 'CREDITS' | 'BRL';
 
@@ -2623,6 +2628,27 @@ class FinancialLedgerService {
 
   public clearPayoutSimulations(): void {
     getSafeStorage().removeItem(STORAGE_KEY_PAYOUTS_SIMULATED);
+  }
+
+  /**
+   * RELATÓRIO FINANCEIRO DE RECEITAS POR SERVIÇO E GERAÇÃO DE GANHOS (70/30)
+   * Lê o livro-razão imutável e os registros de repasse sem alterar lançamentos históricos.
+   */
+  public getRevenueAndEarningsReport(
+    period: RevenueReportPeriodFilter = 'all'
+  ): RevenueAndEarningsReportResult {
+    this.ensureInitialLiveAuditEntries();
+    const entries = this.getEntries();
+    const payouts = [
+      ...this.getPayoutRecords('production'),
+      ...this.getPayoutRecords('sandbox'),
+    ];
+    return buildOfficialLedgerRevenueReport({
+      period,
+      entriesOverride: entries,
+      payoutsOverride: payouts,
+      purchasesOverride: [],
+    });
   }
 }
 

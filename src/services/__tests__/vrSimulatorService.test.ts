@@ -1096,6 +1096,549 @@ export async function runVrSimulatorTestSuite(): Promise<VrSimulatorTestSuiteSum
     }
   );
 
+  // ===========================================================================
+  // 13 TESTES OBRIGATÓRIOS: INDICADOR FIXO "MODO SIMULAÇÃO — DIA X" E SELETOR
+  // DE AVANÇO MANUAL DE DATA SIMULADA (VR-TOP-01 a VR-TOP-13)
+  // ===========================================================================
+
+  // 1. VR-TOP-01: Exibir "MODO SIMULAÇÃO — DIA 1" quando a simulação está ativa no Dia 1
+  await runTest(
+    30,
+    'VR-TOP-01',
+    'Exibir "MODO SIMULAÇÃO — DIA 1" quando a simulação está ativa no Dia 1',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      const snap = engine.ensureDayOneStarted();
+      const banner = engine.getTopBannerStatus();
+
+      if (
+        !banner.isSimulationModeActive ||
+        !banner.isStateConfirmed ||
+        !banner.bannerVisible ||
+        banner.currentDay !== 1 ||
+        banner.indicatorText !== 'MODO SIMULAÇÃO — DIA 1' ||
+        snap.topBannerStatus.indicatorText !== 'MODO SIMULAÇÃO — DIA 1'
+      ) {
+        throw new Error(
+          `Esperado indicador "MODO SIMULAÇÃO — DIA 1", obtido: ${JSON.stringify(banner)}`
+        );
+      }
+      return `Indicador ativo e confirmado no Dia 1: "${banner.indicatorText}" (data simulada=${banner.simulatedDateIso}).`;
+    }
+  );
+
+  // 2. VR-TOP-02: Ocultar ou desativar o indicador quando o modo de simulação estiver desligado (e não afirmar falsamente simulação ativa se não confirmado)
+  await runTest(
+    31,
+    'VR-TOP-02',
+    'Ocultar ou desativar o indicador quando o modo de simulação estiver desligado e exibir indisponibilidade quando não confirmado',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+
+      // Desativa o modo de simulação
+      engine.setSimulationModeActive(false);
+      const inactiveBanner = engine.getTopBannerStatus();
+      if (
+        inactiveBanner.isSimulationModeActive !== false ||
+        inactiveBanner.bannerVisible !== false ||
+        inactiveBanner.indicatorText !== null
+      ) {
+        throw new Error(
+          `O indicador deveria estar oculto/inativo quando desligado, mas retornou: ${JSON.stringify(inactiveBanner)}`
+        );
+      }
+
+      // Tentativa de avançar com modo desligado deve ser bloqueada
+      const blockedWhenInactive = engine.manualAdvanceSimulatedDay({
+        targetDay: 2,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+      if (
+        blockedWhenInactive.success !== false ||
+        blockedWhenInactive.errorCode !== 'SIMULATION_MODE_INACTIVE'
+      ) {
+        throw new Error('Avanço manual deveria ser bloqueado com modo de simulação inativo.');
+      }
+
+      // Reativa simulação mas marca estado como não confirmado
+      engine.setSimulationModeActive(true);
+      engine.setStateConfirmationAvailable(
+        false,
+        'Falha na verificação de confirmação do sandbox'
+      );
+      const unconfirmedBanner = engine.getTopBannerStatus();
+      if (
+        unconfirmedBanner.isStateConfirmed !== false ||
+        unconfirmedBanner.indicatorText !== null ||
+        !unconfirmedBanner.hasServiceError
+      ) {
+        throw new Error(
+          'Quando o estado não é confirmado, o indicador não pode afirmar falsamente que a simulação está ativa.'
+        );
+      }
+
+      return `Modo desligado -> bannerVisible=false, indicatorText=null; Estado não confirmado -> isStateConfirmed=false, indicatorText=null com alerta de indisponibilidade.`;
+    }
+  );
+
+  // 3. VR-TOP-03: Manter o indicador visível no topo do CentralAdminDashboardModal durante a navegação/rolagem entre seções
+  await runTest(
+    32,
+    'VR-TOP-03',
+    'Manter o indicador fixo no topo do CentralAdminDashboardModal fora do container de rolagem em todas as 13 seções',
+    async () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+      const banner = engine.getTopBannerStatus();
+
+      if (
+        banner.fixedTopLayoutSpec.containerRole !== 'persistent_top_bar_outside_scroll' ||
+        banner.fixedTopLayoutSpec.remainsVisibleOnScroll !== true ||
+        banner.fixedTopLayoutSpec.supportedAdminSectionsCount !== 13
+      ) {
+        throw new Error('Especificação de layout fixo fora da rolagem inválida.');
+      }
+
+      // Verificação estrutural no código real do CentralAdminDashboardModal.tsx
+      const fs = await import('fs');
+      const path = await import('path');
+      const modalFilePath = path.resolve(
+        process.cwd(),
+        'src/components/CentralAdminDashboardModal.tsx'
+      );
+      const modalSource = fs.readFileSync(modalFilePath, 'utf-8');
+
+      const bannerIdx = modalSource.indexOf('data-testid="simulation-mode-top-banner"');
+      const scrollMainIdx = modalSource.indexOf('<main className="flex-1 overflow-y-auto');
+
+      if (bannerIdx === -1 || scrollMainIdx === -1 || bannerIdx >= scrollMainIdx) {
+        throw new Error(
+          'O indicador data-testid="simulation-mode-top-banner" não está posicionado acima e fora do container <main className="flex-1 overflow-y-auto">!'
+        );
+      }
+
+      return `Indicador posicionado no topo fixo (índice=${bannerIdx}) antes do container de rolagem <main overflow-y-auto> (índice=${scrollMainIdx}), permanecendo visível nas 13 seções.`;
+    }
+  );
+
+  // 4. VR-TOP-04: Avançar manualmente do Dia 1 para o Dia 2 e atualizar o indicador para "MODO SIMULAÇÃO — DIA 2"
+  await runTest(
+    33,
+    'VR-TOP-04',
+    'Avançar manualmente do Dia 1 para o Dia 2 e atualizar o indicador para "MODO SIMULAÇÃO — DIA 2"',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+
+      const res = engine.manualAdvanceSimulatedDay({
+        targetDay: 2,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const banner = engine.getTopBannerStatus();
+      if (
+        !res.success ||
+        res.noOp !== false ||
+        res.previousDay !== 1 ||
+        res.requestedDay !== 2 ||
+        res.confirmedDay !== 2 ||
+        res.indicatorText !== 'MODO SIMULAÇÃO — DIA 2' ||
+        banner.indicatorText !== 'MODO SIMULAÇÃO — DIA 2'
+      ) {
+        throw new Error(`Falha ao avançar do Dia 1 para o Dia 2: ${JSON.stringify(res)}`);
+      }
+      return `Avanço confirmado: Dia ${res.previousDay} -> Dia ${res.confirmedDay}, indicador="${banner.indicatorText}", checkpoints=${res.snapshot.checkpoints.length}.`;
+    }
+  );
+
+  // 5. VR-TOP-05: Avançar em salto do Dia 2 para o Dia 7, atualizando para "MODO SIMULAÇÃO — DIA 7"
+  await runTest(
+    34,
+    'VR-TOP-05',
+    'Avançar em salto do Dia 2 para o Dia 7, processando eventos vencidos em ordem cronológica e atualizando para "MODO SIMULAÇÃO — DIA 7"',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+      engine.manualAdvanceSimulatedDay({
+        targetDay: 2,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const resJump = engine.manualAdvanceSimulatedDay({
+        targetDay: 7,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const banner = engine.getTopBannerStatus();
+      const checkpointDays = resJump.snapshot.checkpoints.map((c) => c.dayNumber);
+      const expectedDays = [1, 2, 3, 4, 5, 6, 7];
+
+      if (
+        !resJump.success ||
+        resJump.previousDay !== 2 ||
+        resJump.confirmedDay !== 7 ||
+        resJump.daysAdvancedCount !== 5 ||
+        resJump.checkpointsProcessedCount !== 5 ||
+        banner.indicatorText !== 'MODO SIMULAÇÃO — DIA 7' ||
+        JSON.stringify(checkpointDays) !== JSON.stringify(expectedDays)
+      ) {
+        throw new Error(
+          `Salto do Dia 2 para o Dia 7 falhou: indicator=${banner.indicatorText}, checkpoints=${JSON.stringify(checkpointDays)}`
+        );
+      }
+
+      return `Salto Dia 2 -> Dia 7 concluído: 5 dias processados em ordem cronológica (${checkpointDays.join(',')}), indicador="${banner.indicatorText}".`;
+    }
+  );
+
+  // 6. VR-TOP-06: Avançar até o Dia 30 e exibir "MODO SIMULAÇÃO — DIA 30"
+  await runTest(
+    35,
+    'VR-TOP-06',
+    'Avançar manualmente até o limite do Dia 30 e exibir "MODO SIMULAÇÃO — DIA 30" com reconciliação íntegra',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+
+      const res30 = engine.manualAdvanceSimulatedDay({
+        targetDay: 30,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const banner = engine.getTopBannerStatus();
+      if (
+        !res30.success ||
+        res30.confirmedDay !== 30 ||
+        banner.currentDay !== 30 ||
+        banner.indicatorText !== 'MODO SIMULAÇÃO — DIA 30' ||
+        banner.clockStatus !== 'completed' ||
+        res30.snapshot.checkpoints.length !== 30 ||
+        !res30.snapshot.latestReconciliation.isBalanced
+      ) {
+        throw new Error(`Falha ao avançar até o Dia 30: ${JSON.stringify(banner)}`);
+      }
+
+      return `Avanço até o limite concluído: "${banner.indicatorText}", status=${banner.clockStatus}, 30 checkpoints reconciliados (delta=0¢).`;
+    }
+  );
+
+  // 7. VR-TOP-07: Rejeitar valores inválidos: 0, negativos, NaN, não inteiros e valores maiores que 30
+  await runTest(
+    36,
+    'VR-TOP-07',
+    'Rejeitar valores inválidos: 0, negativos, NaN, não inteiros, strings/nulos e valores maiores que 30',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+
+      const invalidInputs: unknown[] = [0, -1, -30, Number.NaN, Number.POSITIVE_INFINITY, 2.5, '5', null, undefined, 31, 99];
+
+      for (const invalidVal of invalidInputs) {
+        const res = engine.manualAdvanceSimulatedDay({
+          targetDay: invalidVal,
+          actorId: 'admin_master',
+          actorRole: 'admin',
+        });
+        if (res.success !== false || res.confirmedDay !== 1) {
+          throw new Error(
+            `Valor inválido (${String(invalidVal)}) não foi rejeitado! Retornou: ${JSON.stringify(res)}`
+          );
+        }
+        const expectedCode =
+          typeof invalidVal === 'number' && Number.isInteger(invalidVal) && invalidVal > 30
+            ? 'MAX_SIMULATION_DAY_EXCEEDED'
+            : 'INVALID_TARGET_DAY';
+        if (res.errorCode !== expectedCode) {
+          throw new Error(
+            `Código de erro incorreto para (${String(invalidVal)}): esperado ${expectedCode}, obtido ${res.errorCode}`
+          );
+        }
+      }
+
+      // Também valida rejeição quando usuário não possui permissão de administrador
+      const unauthorizedRes = engine.manualAdvanceSimulatedDay({
+        targetDay: 3,
+        actorId: 'regular_user_01',
+        actorRole: 'fan',
+      });
+      if (
+        unauthorizedRes.success !== false ||
+        unauthorizedRes.errorCode !== 'UNAUTHORIZED_ADMIN_ACTION' ||
+        engine.getTopBannerStatus().currentDay !== 1
+      ) {
+        throw new Error('Tentativa sem permissão administrativa não foi bloqueada!');
+      }
+
+      return `${invalidInputs.length} entradas inválidas (0, negativos, NaN, 2.5, string, null, 31, 99) e 1 tentativa sem permissão admin rejeitadas mantendo "MODO SIMULAÇÃO — DIA 1".`;
+    }
+  );
+
+  // 8. VR-TOP-08: Rejeitar tentativa de voltar do Dia 7 para um dia anterior, como Dia 3
+  await runTest(
+    37,
+    'VR-TOP-08',
+    'Rejeitar tentativa de retroceder a data simulada do Dia 7 para um dia anterior como o Dia 3',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+      engine.manualAdvanceSimulatedDay({
+        targetDay: 7,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const ledgerBefore = engine.getStateSnapshot().ledgerEntriesCount;
+      const backwardRes = engine.manualAdvanceSimulatedDay({
+        targetDay: 3,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const bannerAfter = engine.getTopBannerStatus();
+      const ledgerAfter = engine.getStateSnapshot().ledgerEntriesCount;
+
+      if (
+        backwardRes.success !== false ||
+        backwardRes.errorCode !== 'BACKWARD_DATE_ADVANCE_FORBIDDEN' ||
+        backwardRes.confirmedDay !== 7 ||
+        bannerAfter.indicatorText !== 'MODO SIMULAÇÃO — DIA 7' ||
+        ledgerBefore !== ledgerAfter
+      ) {
+        throw new Error(
+          `Retrocesso do Dia 7 para o Dia 3 não foi bloqueado corretamente: ${JSON.stringify(backwardRes)}`
+        );
+      }
+
+      return `Retrocesso Dia 7 -> Dia 3 bloqueado (${backwardRes.errorCode}); indicador preservado em "${bannerAfter.indicatorText}" com ${ledgerAfter} lançamentos intactos.`;
+    }
+  );
+
+  // 9. VR-TOP-09: Tratar seleção do próprio dia atual como operação sem efeito, sem duplicar eventos
+  await runTest(
+    38,
+    'VR-TOP-09',
+    'Tratar seleção do próprio dia atual como operação sem efeito (no-op), sem reprocessar ou duplicar eventos',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+      engine.manualAdvanceSimulatedDay({
+        targetDay: 4,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const snapBefore = engine.getStateSnapshot();
+      const sameDayRes = engine.manualAdvanceSimulatedDay({
+        targetDay: 4,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+      const snapAfter = engine.getStateSnapshot();
+
+      if (
+        !sameDayRes.success ||
+        sameDayRes.noOp !== true ||
+        sameDayRes.daysAdvancedCount !== 0 ||
+        sameDayRes.checkpointsProcessedCount !== 0 ||
+        sameDayRes.ledgerEntriesDeltaCount !== 0 ||
+        snapAfter.ledgerEntriesCount !== snapBefore.ledgerEntriesCount ||
+        snapAfter.checkpoints.length !== snapBefore.checkpoints.length ||
+        snapAfter.totals.messagesSent !== snapBefore.totals.messagesSent
+      ) {
+        throw new Error('Seleção do próprio dia atual gerou efeitos colaterais ou duplicou eventos!');
+      }
+
+      return `Seleção do próprio Dia 4 tratada como noOp=true (0 checkpoints extras, ${snapAfter.ledgerEntriesCount} lançamentos e ${snapAfter.totals.messagesSent} mensagens inalterados).`;
+    }
+  );
+
+  // 10. VR-TOP-10: Impedir cliques concorrentes ou repetidos de corromperem o relógio ou duplicarem transações
+  await runTest(
+    39,
+    'VR-TOP-10',
+    'Impedir cliques concorrentes ou repetidos de corromperem o relógio simulado ou duplicarem transações',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+
+      // 1. Simula tentativa concorrente enquanto uma mutação atômica está em curso no motor
+      let concurrentAttemptResult: ReturnType<typeof engine.manualAdvanceSimulatedDay> | null = null;
+      engine.executeAtomically(() => {
+        concurrentAttemptResult = engine.manualAdvanceSimulatedDay({
+          targetDay: 5,
+          actorId: 'admin_master',
+          actorRole: 'admin',
+        });
+      });
+
+      if (
+        !concurrentAttemptResult ||
+        (concurrentAttemptResult as any).success !== false ||
+        (concurrentAttemptResult as any).errorCode !== 'CONCURRENT_ADVANCE_BLOCKED' ||
+        engine.getTopBannerStatus().currentDay !== 1
+      ) {
+        throw new Error('Chamada concorrente durante lock ativo não foi bloqueada com CONCURRENT_ADVANCE_BLOCKED!');
+      }
+
+      // 2. Simula cliques repetidos rápidos para o mesmo destino (Dia 6)
+      const firstClick = engine.manualAdvanceSimulatedDay({
+        targetDay: 6,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+      const ledgerAfterFirst = firstClick.snapshot.ledgerEntriesCount;
+      const netRevenueAfterFirst = firstClick.snapshot.latestReconciliation.netEligibleRevenueCents;
+
+      const secondRepeatedClick = engine.manualAdvanceSimulatedDay({
+        targetDay: 6,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      if (
+        !firstClick.success ||
+        firstClick.confirmedDay !== 6 ||
+        !secondRepeatedClick.noOp ||
+        secondRepeatedClick.snapshot.ledgerEntriesCount !== ledgerAfterFirst ||
+        secondRepeatedClick.snapshot.latestReconciliation.netEligibleRevenueCents !== netRevenueAfterFirst ||
+        !secondRepeatedClick.snapshot.latestReconciliation.isBalanced
+      ) {
+        throw new Error('Cliques repetidos para o mesmo dia corromperam o relógio ou duplicaram transações!');
+      }
+
+      return `Concorrência bloqueada (CONCURRENT_ADVANCE_BLOCKED) e clique repetido para o Dia 6 neutralizado sem duplicar transações (${ledgerAfterFirst} lançamentos, delta=0¢).`;
+    }
+  );
+
+  // 11. VR-TOP-11: Não atualizar o indicador se o serviço de avanço retornar erro
+  await runTest(
+    40,
+    'VR-TOP-11',
+    'Não atualizar o indicador para o novo dia se o serviço de avanço falhar, mantendo o estado anterior e exibindo erro claro',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+      engine.manualAdvanceSimulatedDay({
+        targetDay: 3,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const ledgerBeforeError = engine.getStateSnapshot().ledgerEntriesCount;
+      engine.setSimulatedAdvanceFailure('Timeout simulado de sincronização do banco de carga');
+
+      const failedAdvance = engine.manualAdvanceSimulatedDay({
+        targetDay: 8,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const bannerAfterFailure = engine.getTopBannerStatus();
+      const ledgerAfterError = engine.getStateSnapshot().ledgerEntriesCount;
+
+      if (
+        failedAdvance.success !== false ||
+        failedAdvance.errorCode !== 'SIMULATOR_SERVICE_FAILURE' ||
+        failedAdvance.confirmedDay !== 3 ||
+        bannerAfterFailure.currentDay !== 3 ||
+        bannerAfterFailure.indicatorText !== 'MODO SIMULAÇÃO — DIA 3' ||
+        !failedAdvance.errorMessage?.includes('Timeout simulado') ||
+        ledgerAfterError !== ledgerBeforeError
+      ) {
+        throw new Error(
+          `Indicador ou estado foi alterado indevidamente após erro do serviço: ${JSON.stringify(failedAdvance)}`
+        );
+      }
+
+      // Limpa a falha e confirma recuperação normal
+      engine.setSimulatedAdvanceFailure(null);
+      return `Falha no avanço Dia 3 -> Dia 8 capturada (${failedAdvance.errorCode}); indicador mantido em "${bannerAfterFailure.indicatorText}" com 0 mutações parciais.`;
+    }
+  );
+
+  // 12. VR-TOP-12: Registrar log de auditoria no avanço manual de data
+  await runTest(
+    41,
+    'VR-TOP-12',
+    'Registrar log de auditoria completo em cada avanço manual (administrador, dia anterior, dia solicitado, dia confirmado, timestamp real e executionId)',
+    () => {
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+
+      const res = engine.manualAdvanceSimulatedDay({
+        targetDay: 5,
+        actorId: 'admin_security_lead',
+        actorRole: 'admin',
+        executionId: 'exec_load_test_day1_to_day5',
+      });
+
+      const auditLogs = engine.getManualAdvanceAuditLogs();
+      const latestLog = auditLogs[auditLogs.length - 1];
+
+      if (
+        !latestLog ||
+        latestLog.actorId !== 'admin_security_lead' ||
+        latestLog.actorRole !== 'admin' ||
+        latestLog.previousDay !== 1 ||
+        latestLog.requestedDay !== 5 ||
+        latestLog.confirmedDay !== 5 ||
+        latestLog.executionId !== 'exec_load_test_day1_to_day5' ||
+        latestLog.result !== 'success' ||
+        latestLog.productionDataTouched !== false ||
+        Number.isNaN(Date.parse(latestLog.realTimestampIso)) ||
+        res.auditRecord.auditId !== latestLog.auditId
+      ) {
+        throw new Error(`Registro de auditoria incompleto ou inválido: ${JSON.stringify(latestLog)}`);
+      }
+
+      return `Auditoria gravada: auditId=${latestLog.auditId}, actor=${latestLog.actorId} (${latestLog.actorRole}), Dia ${latestLog.previousDay} -> solicitado Dia ${latestLog.requestedDay} -> confirmado Dia ${latestLog.confirmedDay}, timestampReal=${latestLog.realTimestampIso}, executionId=${latestLog.executionId}.`;
+    }
+  );
+
+  // 13. VR-TOP-13: Garantir que o avanço simulado não altera dados de produção nem o relógio real do sistema
+  await runTest(
+    42,
+    'VR-TOP-13',
+    'Garantir que o avanço manual da data simulada não altera dados de produção (financialLedger) nem o relógio real do sistema (Date.now)',
+    () => {
+      const prodEntriesBefore = financialLedger.getEntries().length;
+      const realClockBeforeMs = Date.now();
+
+      const engine = new VrSimulatorEngine(20261025);
+      engine.ensureDayOneStarted();
+      const res = engine.manualAdvanceSimulatedDay({
+        targetDay: 15,
+        actorId: 'admin_master',
+        actorRole: 'admin',
+      });
+
+      const realClockAfterMs = Date.now();
+      const prodEntriesAfter = financialLedger.getEntries().length;
+      const realElapsedMs = realClockAfterMs - realClockBeforeMs;
+
+      // O relógio simulado avançou 15 dias (2026-10-16), mas Date.now() só pode ter avançado alguns milissegundos reais
+      if (realElapsedMs < 0 || realElapsedMs > 30_000) {
+        throw new Error(`Relógio real do sistema sofreu desvio anômalo: ${realElapsedMs}ms`);
+      }
+      if (prodEntriesBefore !== prodEntriesAfter) {
+        throw new Error(
+          `Livro-razão de produção foi alterado durante o avanço simulado (${prodEntriesBefore} -> ${prodEntriesAfter})!`
+        );
+      }
+      if (!res.simulatedDateIso.startsWith('2026-10-16')) {
+        throw new Error(`Data simulada no Dia 15 incorreta: ${res.simulatedDateIso}`);
+      }
+
+      return `Isolamento confirmado: data simulada avançou para ${res.simulatedDateIso} (Dia 15), relógio real do sistema avançou apenas ${realElapsedMs}ms reais e financialLedger de produção permaneceu intacto (${prodEntriesAfter} entradas).`;
+    }
+  );
+
   const passed = results.filter((r) => r.passed).length;
   const failed = results.length - passed;
 
@@ -1107,4 +1650,5 @@ export async function runVrSimulatorTestSuite(): Promise<VrSimulatorTestSuiteSum
     results,
   };
 }
+
 

@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano Técnico Priorizado de Evolução para a plataforma global de relacionamentos JOBS 1.0, estruturado em 11 fases incrementais com garantia de preservação de código, arquitetura isomórfica, ledger contábil 70/30 e cobertura de testes.",
-  "updatedAt":  "2026-10-23T11:39:24.034986928Z",
+  "summary":  "Plano arquitetural e funcional para o Relatório Financeiro de Receitas e Geração de Ganhos no CentralAdminDashboardModal, incluindo auditoria contábil real, gráficos Recharts (Pizza e Barras), reconciliação financeira com o livro-razão, rastreabilidade de transações históricas e suíte de testes verificáveis.",
+  "updatedAt":  "2026-10-26T01:26:41.990532548Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -23,6 +23,7 @@
 
 import { INITIAL_PROFILES } from '../data/mockData';
 import { financialLedger } from './ledgerService';
+import { adminAuditService, AdminRole } from './adminAuditService';
 
 export const VR_SIMULATOR_WATERMARK =
   'SIMULAÇÃO — DADOS FICTÍCIOS — SEM VALOR FINANCEIRO REAL' as const;
@@ -519,6 +520,86 @@ export interface VrSimulatorStateSnapshot {
     payoutsSettledCount: number;
     capacityThrottledEvents: number;
   };
+  isSimulationModeActive: boolean;
+  topBannerStatus: SimulationTopBannerStatus;
+  manualAdvanceAuditLogs: SimulationDayAdvanceAuditRecord[];
+}
+
+export type ManualAdvanceRejectionCode =
+  | 'SIMULATION_MODE_INACTIVE'
+  | 'SIMULATION_STATE_UNCONFIRMED'
+  | 'UNAUTHORIZED_ADMIN_ACTION'
+  | 'INVALID_TARGET_DAY'
+  | 'MAX_SIMULATION_DAY_EXCEEDED'
+  | 'BACKWARD_DATE_ADVANCE_FORBIDDEN'
+  | 'CONCURRENT_ADVANCE_BLOCKED'
+  | 'SIMULATOR_SERVICE_FAILURE';
+
+export interface SimulationDayAdvanceAuditRecord {
+  auditId: string;
+  executionId: string;
+  scenarioId: string;
+  actorId: string;
+  actorRole: string;
+  previousDay: number;
+  requestedDay: number | string;
+  confirmedDay: number;
+  realTimestampIso: string;
+  simulatedDateBeforeIso: string;
+  simulatedDateAfterIso: string;
+  result: 'success' | 'no_op' | 'rejected' | 'error';
+  rejectionCode?: ManualAdvanceRejectionCode;
+  reason: string;
+  checkpointsProcessedInStep: number;
+  ledgerEntriesDeltaInStep: number;
+  productionDataTouched: false;
+}
+
+export interface SimulationTopBannerStatus {
+  isSimulationModeActive: boolean;
+  isStateConfirmed: boolean;
+  hasServiceError: boolean;
+  serviceErrorMessage: string | null;
+  bannerVisible: boolean;
+  indicatorText: string | null;
+  currentDay: number;
+  totalDays: number;
+  simulatedDateIso: string;
+  clockStatus: SimulatorClockStatus;
+  namespace: typeof VR_SIMULATOR_NAMESPACE;
+  shortBadge: typeof VR_SIMULATOR_SHORT_BADGE;
+  financialBadge: typeof VR_FINANCIAL_SIMULATION_BADGE;
+  fixedTopLayoutSpec: {
+    containerRole: 'persistent_top_bar_outside_scroll';
+    remainsVisibleOnScroll: true;
+    supportedAdminSectionsCount: 13;
+  };
+}
+
+export interface ManualDayAdvanceRequest {
+  targetDay: unknown;
+  actorId?: string;
+  actorRole?: string;
+  executionId?: string;
+}
+
+export interface ManualDayAdvanceResult {
+  success: boolean;
+  noOp: boolean;
+  executionId: string;
+  previousDay: number;
+  requestedDay: number;
+  confirmedDay: number;
+  indicatorText: string | null;
+  realTimestampIso: string;
+  simulatedDateIso: string;
+  daysAdvancedCount: number;
+  checkpointsProcessedCount: number;
+  ledgerEntriesDeltaCount: number;
+  errorCode?: ManualAdvanceRejectionCode;
+  errorMessage?: string;
+  auditRecord: SimulationDayAdvanceAuditRecord;
+  snapshot: VrSimulatorStateSnapshot;
 }
 
 /**
@@ -646,6 +727,13 @@ export class VrSimulatorEngine {
   private initialLaunchState!: InitialLaunchStateRecord;
   private duplicateDayTickPreventedCount = 0;
   private mutexLocked = false;
+  private manualAdvanceInProgress = false;
+  private simulationModeActive = true;
+  private stateConfirmationAvailable = true;
+  private stateConfirmationErrorMessage: string | null = null;
+  private simulatedAdvanceFailureMessage: string | null = null;
+  private manualAdvanceAuditHistory: SimulationDayAdvanceAuditRecord[] = [];
+  private listeners: Set<() => void> = new Set();
   private mediaPlayerState: {
     currentState: MediaPlayerLifecycleState;
     activeAssetPath: string;
@@ -717,6 +805,492 @@ export class VrSimulatorEngine {
       return operation();
     } finally {
       this.mutexLocked = false;
+    }
+  }
+
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener();
+      } catch {
+        // Ignora falhas de listener isolado da UI
+      }
+    }
+  }
+
+  public isSimulationModeEnabled(): boolean {
+    return this.simulationModeActive;
+  }
+
+  public setSimulationModeActive(active: boolean): VrSimulatorStateSnapshot {
+    this.simulationModeActive = Boolean(active);
+    this.notifyListeners();
+    return this.getStateSnapshot();
+  }
+
+  public setStateConfirmationAvailable(
+    available: boolean,
+    errorReason?: string
+  ): VrSimulatorStateSnapshot {
+    this.stateConfirmationAvailable = Boolean(available);
+    this.stateConfirmationErrorMessage = available
+      ? null
+      : errorReason || 'Não foi possível confirmar o estado do relógio simulado no sandbox.';
+    this.notifyListeners();
+    return this.getStateSnapshot();
+  }
+
+  public setSimulatedAdvanceFailure(errorMessage: string | null): void {
+    this.simulatedAdvanceFailureMessage = errorMessage;
+    this.notifyListeners();
+  }
+
+  public ensureDayOneStarted(): VrSimulatorStateSnapshot {
+    if (this.simulationModeActive && this.currentDay === 0 && this.clockStatus === 'idle') {
+      return this.start();
+    }
+    return this.getStateSnapshot();
+  }
+
+  public getManualAdvanceAuditLogs(): SimulationDayAdvanceAuditRecord[] {
+    return [...this.manualAdvanceAuditHistory];
+  }
+
+  public getTopBannerStatus(): SimulationTopBannerStatus {
+    const effectiveDay = Math.max(1, this.currentDay);
+    const simulatedDateIso = new Date(
+      this.baseDateMs + effectiveDay * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    if (!this.simulationModeActive || this.clockStatus === 'terminated') {
+      return {
+        isSimulationModeActive: false,
+        isStateConfirmed: this.stateConfirmationAvailable,
+        hasServiceError: false,
+        serviceErrorMessage: null,
+        bannerVisible: false,
+        indicatorText: null,
+        currentDay: effectiveDay,
+        totalDays: this.capacityConfig.totalDays,
+        simulatedDateIso,
+        clockStatus: this.clockStatus,
+        namespace: VR_SIMULATOR_NAMESPACE,
+        shortBadge: VR_SIMULATOR_SHORT_BADGE,
+        financialBadge: VR_FINANCIAL_SIMULATION_BADGE,
+        fixedTopLayoutSpec: {
+          containerRole: 'persistent_top_bar_outside_scroll',
+          remainsVisibleOnScroll: true,
+          supportedAdminSectionsCount: 13,
+        },
+      };
+    }
+
+    if (!this.stateConfirmationAvailable) {
+      return {
+        isSimulationModeActive: true,
+        isStateConfirmed: false,
+        hasServiceError: true,
+        serviceErrorMessage:
+          this.stateConfirmationErrorMessage ||
+          'Estado da simulação indisponível ou não confirmado.',
+        bannerVisible: true,
+        indicatorText: null,
+        currentDay: effectiveDay,
+        totalDays: this.capacityConfig.totalDays,
+        simulatedDateIso,
+        clockStatus: this.clockStatus,
+        namespace: VR_SIMULATOR_NAMESPACE,
+        shortBadge: VR_SIMULATOR_SHORT_BADGE,
+        financialBadge: VR_FINANCIAL_SIMULATION_BADGE,
+        fixedTopLayoutSpec: {
+          containerRole: 'persistent_top_bar_outside_scroll',
+          remainsVisibleOnScroll: true,
+          supportedAdminSectionsCount: 13,
+        },
+      };
+    }
+
+    return {
+      isSimulationModeActive: true,
+      isStateConfirmed: true,
+      hasServiceError: Boolean(this.simulatedAdvanceFailureMessage),
+      serviceErrorMessage: this.simulatedAdvanceFailureMessage,
+      bannerVisible: true,
+      indicatorText: `MODO SIMULAÇÃO — DIA ${effectiveDay}`,
+      currentDay: effectiveDay,
+      totalDays: this.capacityConfig.totalDays,
+      simulatedDateIso,
+      clockStatus: this.clockStatus,
+      namespace: VR_SIMULATOR_NAMESPACE,
+      shortBadge: VR_SIMULATOR_SHORT_BADGE,
+      financialBadge: VR_FINANCIAL_SIMULATION_BADGE,
+      fixedTopLayoutSpec: {
+        containerRole: 'persistent_top_bar_outside_scroll',
+        remainsVisibleOnScroll: true,
+        supportedAdminSectionsCount: 13,
+      },
+    };
+  }
+
+  /**
+   * Avança manualmente a data simulada do painel administrativo para testes de carga
+   * (do Dia 1 até o Dia 30), com validação estrita, proteção contra cliques concorrentes,
+   * processamento determinístico de eventos vencidos e registro completo de auditoria.
+   */
+  public manualAdvanceSimulatedDay(request: ManualDayAdvanceRequest): ManualDayAdvanceResult {
+    const realTimestampIso = new Date().toISOString();
+    const actorId =
+      typeof request?.actorId === 'string' && request.actorId.trim().length > 0
+        ? request.actorId.trim()
+        : 'admin_master';
+    const actorRole =
+      typeof request?.actorRole === 'string' && request.actorRole.trim().length > 0
+        ? request.actorRole.trim()
+        : 'admin';
+    const rawTarget = request?.targetDay;
+    const effectivePreviousDay = Math.max(1, this.currentDay);
+    const simulatedDateBeforeIso = new Date(
+      this.baseDateMs + effectivePreviousDay * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const scenarioId = this.initialLaunchState?.scenarioId || `launch_d1_seed_${this.seed}`;
+    const executionId =
+      typeof request?.executionId === 'string' && request.executionId.trim().length > 0
+        ? request.executionId.trim()
+        : `sim_manual_adv_${this.seed}_seq_${this.manualAdvanceAuditHistory.length + 1}`;
+
+    const recordAndReturnRejection = (
+      rejectionCode: ManualAdvanceRejectionCode,
+      errorMessage: string,
+      resultKind: 'rejected' | 'error' = 'rejected'
+    ): ManualDayAdvanceResult => {
+      const confirmedDay = Math.max(1, this.currentDay);
+      const simulatedDateAfterIso = new Date(
+        this.baseDateMs + confirmedDay * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const auditRecord: SimulationDayAdvanceAuditRecord = {
+        auditId: `sim_adv_aud_${String(this.manualAdvanceAuditHistory.length + 1).padStart(4, '0')}`,
+        executionId,
+        scenarioId,
+        actorId,
+        actorRole,
+        previousDay: effectivePreviousDay,
+        requestedDay:
+          typeof rawTarget === 'number' && Number.isFinite(rawTarget)
+            ? rawTarget
+            : String(rawTarget),
+        confirmedDay,
+        realTimestampIso,
+        simulatedDateBeforeIso,
+        simulatedDateAfterIso,
+        result: resultKind,
+        rejectionCode,
+        reason: errorMessage,
+        checkpointsProcessedInStep: 0,
+        ledgerEntriesDeltaInStep: 0,
+        productionDataTouched: false,
+      };
+      this.manualAdvanceAuditHistory.push(auditRecord);
+
+      const safeAdminRole: AdminRole =
+        actorRole === 'master' ||
+        actorRole === 'admin' ||
+        actorRole === 'finance' ||
+        actorRole === 'moderator' ||
+        actorRole === 'security' ||
+        actorRole === 'auditor'
+          ? actorRole
+          : 'system';
+
+      void adminAuditService.logActivity({
+        actorId,
+        actorRole: safeAdminRole,
+        action: rejectionCode === 'UNAUTHORIZED_ADMIN_ACTION' ? 'ACCESS_DENIED' : 'SANDBOX_TOGGLE',
+        targetType: 'environment',
+        targetId: executionId,
+        result: rejectionCode === 'UNAUTHORIZED_ADMIN_ACTION' ? 'denied' : 'failure',
+        reason: errorMessage,
+        environment: 'sandbox',
+        metadata: {
+          executionId,
+          scenarioId,
+          actorId,
+          actorRole,
+          previousDay: effectivePreviousDay,
+          requestedDay: String(rawTarget),
+          confirmedDay,
+          realTimestampIso,
+          rejectionCode,
+        },
+      });
+
+      const banner = this.getTopBannerStatus();
+      return {
+        success: false,
+        noOp: false,
+        executionId,
+        previousDay: effectivePreviousDay,
+        requestedDay: typeof rawTarget === 'number' ? rawTarget : NaN,
+        confirmedDay,
+        indicatorText: banner.indicatorText,
+        realTimestampIso,
+        simulatedDateIso: simulatedDateAfterIso,
+        daysAdvancedCount: 0,
+        checkpointsProcessedCount: 0,
+        ledgerEntriesDeltaCount: 0,
+        errorCode: rejectionCode,
+        errorMessage,
+        auditRecord,
+        snapshot: this.getStateSnapshot(),
+      };
+    };
+
+    // 1. Verificar modo de simulação ativo e confirmado
+    if (!this.simulationModeActive || this.clockStatus === 'terminated') {
+      return recordAndReturnRejection(
+        'SIMULATION_MODE_INACTIVE',
+        'Avanço manual bloqueado: o Modo Simulação está desativado ou encerrado.'
+      );
+    }
+
+    if (!this.stateConfirmationAvailable) {
+      return recordAndReturnRejection(
+        'SIMULATION_STATE_UNCONFIRMED',
+        this.stateConfirmationErrorMessage ||
+          'Avanço manual bloqueado: estado da simulação não pôde ser confirmado.'
+      );
+    }
+
+    // 2. Verificar permissão administrativa
+    if (actorRole !== 'admin' && actorRole !== 'master') {
+      return recordAndReturnRejection(
+        'UNAUTHORIZED_ADMIN_ACTION',
+        `Acesso negado: o perfil "${actorRole}" não possui permissão administrativa para avançar o relógio simulado.`
+      );
+    }
+
+    // 3. Verificar bloqueio de concorrência / clique duplo em andamento
+    if (this.mutexLocked || this.manualAdvanceInProgress) {
+      return recordAndReturnRejection(
+        'CONCURRENT_ADVANCE_BLOCKED',
+        'Operação concorrente bloqueada: já existe um avanço de data simulada em execução.'
+      );
+    }
+
+    // 4. Validar tipo numérico, inteiro e intervalo [1, totalDays]
+    if (
+      typeof rawTarget !== 'number' ||
+      !Number.isFinite(rawTarget) ||
+      !Number.isInteger(rawTarget) ||
+      rawTarget < 1
+    ) {
+      return recordAndReturnRejection(
+        'INVALID_TARGET_DAY',
+        `Dia simulado inválido (${String(rawTarget)}). Informe um número inteiro positivo entre 1 e ${this.capacityConfig.totalDays}.`
+      );
+    }
+
+    const targetDay = rawTarget;
+
+    if (targetDay > this.capacityConfig.totalDays) {
+      return recordAndReturnRejection(
+        'MAX_SIMULATION_DAY_EXCEEDED',
+        `Dia solicitado (Dia ${targetDay}) excede o limite máximo permitido da simulação (Dia ${this.capacityConfig.totalDays}).`
+      );
+    }
+
+    // 5. Bloquear retrocesso de data simulada
+    if (targetDay < effectivePreviousDay) {
+      return recordAndReturnRejection(
+        'BACKWARD_DATE_ADVANCE_FORBIDDEN',
+        `Retrocesso de data bloqueado: não é permitido voltar do Dia ${effectivePreviousDay} para o Dia ${targetDay}.`
+      );
+    }
+
+    // 6. Verificar falha simulada do serviço antes de alterar qualquer estado
+    if (this.simulatedAdvanceFailureMessage) {
+      return recordAndReturnRejection(
+        'SIMULATOR_SERVICE_FAILURE',
+        `Falha no serviço de avanço do simulador: ${this.simulatedAdvanceFailureMessage}`,
+        'error'
+      );
+    }
+
+    // 7. Tratar seleção do próprio dia atual como operação sem efeito (no-op seguro)
+    if (targetDay === effectivePreviousDay) {
+      if (this.currentDay === 0 && targetDay === 1) {
+        this.clockStatus = 'running';
+        this.stepSingleDay(1);
+        this.initialLaunchState.progressiveActivationSteps =
+          this.buildProgressiveActivationSequence(1);
+      }
+      const confirmedDay = Math.max(1, this.currentDay);
+      const simulatedDateAfterIso = new Date(
+        this.baseDateMs + confirmedDay * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const auditRecord: SimulationDayAdvanceAuditRecord = {
+        auditId: `sim_adv_aud_${String(this.manualAdvanceAuditHistory.length + 1).padStart(4, '0')}`,
+        executionId,
+        scenarioId,
+        actorId,
+        actorRole,
+        previousDay: effectivePreviousDay,
+        requestedDay: targetDay,
+        confirmedDay,
+        realTimestampIso,
+        simulatedDateBeforeIso,
+        simulatedDateAfterIso,
+        result: 'no_op',
+        reason: `Seleção do próprio dia atual (Dia ${confirmedDay}) tratada como operação sem efeito (no-op) sem duplicar eventos.`,
+        checkpointsProcessedInStep: 0,
+        ledgerEntriesDeltaInStep: 0,
+        productionDataTouched: false,
+      };
+      this.manualAdvanceAuditHistory.push(auditRecord);
+
+      void adminAuditService.logActivity({
+        actorId,
+        actorRole: actorRole === 'master' ? 'master' : 'admin',
+        action: 'SANDBOX_TOGGLE',
+        targetType: 'environment',
+        targetId: executionId,
+        result: 'success',
+        reason: auditRecord.reason,
+        environment: 'sandbox',
+        metadata: {
+          executionId,
+          scenarioId,
+          actorId,
+          actorRole,
+          previousDay: effectivePreviousDay,
+          requestedDay: targetDay,
+          confirmedDay,
+          realTimestampIso,
+          noOp: true,
+        },
+      });
+
+      this.notifyListeners();
+      return {
+        success: true,
+        noOp: true,
+        executionId,
+        previousDay: effectivePreviousDay,
+        requestedDay: targetDay,
+        confirmedDay,
+        indicatorText: `MODO SIMULAÇÃO — DIA ${confirmedDay}`,
+        realTimestampIso,
+        simulatedDateIso: simulatedDateAfterIso,
+        daysAdvancedCount: 0,
+        checkpointsProcessedCount: 0,
+        ledgerEntriesDeltaCount: 0,
+        auditRecord,
+        snapshot: this.getStateSnapshot(),
+      };
+    }
+
+    // 8. Avanço válido (effectivePreviousDay < targetDay <= totalDays)
+    this.manualAdvanceInProgress = true;
+    try {
+      // Se ainda estava no estado inicial (currentDay === 0), garante a execução do Dia 1 antes de avançar para os dias seguintes
+      if (this.currentDay === 0) {
+        this.clockStatus = 'running';
+        this.stepSingleDay(1);
+        this.initialLaunchState.progressiveActivationSteps =
+          this.buildProgressiveActivationSequence(1);
+      }
+
+      const checkpointsBefore = this.checkpoints.length;
+      const ledgerBefore = this.ledgerEntries.length;
+
+      if (this.clockStatus === 'idle' || this.clockStatus === 'paused') {
+        this.clockStatus = 'running';
+      }
+
+      for (let nextDay = this.currentDay + 1; nextDay <= targetDay; nextDay++) {
+        this.stepSingleDay(nextDay);
+      }
+
+      if (this.currentDay >= this.capacityConfig.totalDays) {
+        this.clockStatus = 'completed';
+      }
+
+      const confirmedDay = this.currentDay;
+      const checkpointsProcessedCount = this.checkpoints.length - checkpointsBefore;
+      const ledgerEntriesDeltaCount = this.ledgerEntries.length - ledgerBefore;
+      const simulatedDateAfterIso = new Date(
+        this.baseDateMs + confirmedDay * 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      const auditRecord: SimulationDayAdvanceAuditRecord = {
+        auditId: `sim_adv_aud_${String(this.manualAdvanceAuditHistory.length + 1).padStart(4, '0')}`,
+        executionId,
+        scenarioId,
+        actorId,
+        actorRole,
+        previousDay: effectivePreviousDay,
+        requestedDay: targetDay,
+        confirmedDay,
+        realTimestampIso,
+        simulatedDateBeforeIso,
+        simulatedDateAfterIso,
+        result: 'success',
+        reason: `Avanço manual de data simulada do Dia ${effectivePreviousDay} para o Dia ${confirmedDay} confirmado (${checkpointsProcessedCount} dia(s) processado(s)).`,
+        checkpointsProcessedInStep: checkpointsProcessedCount,
+        ledgerEntriesDeltaInStep: ledgerEntriesDeltaCount,
+        productionDataTouched: false,
+      };
+      this.manualAdvanceAuditHistory.push(auditRecord);
+
+      void adminAuditService.logActivity({
+        actorId,
+        actorRole: actorRole === 'master' ? 'master' : 'admin',
+        action: 'SANDBOX_TOGGLE',
+        targetType: 'environment',
+        targetId: executionId,
+        result: 'success',
+        reason: auditRecord.reason,
+        environment: 'sandbox',
+        metadata: {
+          executionId,
+          scenarioId,
+          actorId,
+          actorRole,
+          previousDay: effectivePreviousDay,
+          requestedDay: targetDay,
+          confirmedDay,
+          realTimestampIso,
+          checkpointsProcessedCount,
+          ledgerEntriesDeltaCount,
+          noOp: false,
+        },
+      });
+
+      this.notifyListeners();
+      return {
+        success: true,
+        noOp: false,
+        executionId,
+        previousDay: effectivePreviousDay,
+        requestedDay: targetDay,
+        confirmedDay,
+        indicatorText: `MODO SIMULAÇÃO — DIA ${confirmedDay}`,
+        realTimestampIso,
+        simulatedDateIso: simulatedDateAfterIso,
+        daysAdvancedCount: confirmedDay - effectivePreviousDay,
+        checkpointsProcessedCount,
+        ledgerEntriesDeltaCount,
+        auditRecord,
+        snapshot: this.getStateSnapshot(),
+      };
+    } finally {
+      this.manualAdvanceInProgress = false;
     }
   }
 
@@ -959,6 +1533,7 @@ export class VrSimulatorEngine {
     this.currentDay = 0;
     this.clockStatus = 'idle';
     this.duplicateDayTickPreventedCount = 0;
+    this.manualAdvanceInProgress = false;
     this.rankingCycleStatus = 'provisional_simulation';
     this.totals = {
       simulatedInstallsCount: 0,
@@ -1180,6 +1755,7 @@ export class VrSimulatorEngine {
     this.stepSingleDay(1);
     this.initialLaunchState.progressiveActivationSteps =
       this.buildProgressiveActivationSequence(1);
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
@@ -1190,12 +1766,14 @@ export class VrSimulatorEngine {
       mode === 'play_store_day_one_launch'
         ? PLAY_STORE_DAY_ONE_MODE_LABEL
         : 'Simulação Sandbox Padrão';
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
   public start(): VrSimulatorStateSnapshot {
     if (this.currentDay >= this.capacityConfig.totalDays) {
       this.clockStatus = 'completed';
+      this.notifyListeners();
       return this.getStateSnapshot();
     }
     this.clockStatus = 'running';
@@ -1204,6 +1782,7 @@ export class VrSimulatorEngine {
       this.initialLaunchState.progressiveActivationSteps =
         this.buildProgressiveActivationSequence(1);
     }
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
@@ -1211,6 +1790,7 @@ export class VrSimulatorEngine {
     if (this.clockStatus === 'running') {
       this.clockStatus = 'paused';
     }
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
@@ -1220,11 +1800,13 @@ export class VrSimulatorEngine {
     } else {
       this.clockStatus = 'running';
     }
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
   public stop(): VrSimulatorStateSnapshot {
     this.clockStatus = 'terminated';
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
@@ -1281,6 +1863,7 @@ export class VrSimulatorEngine {
       this.seed = Math.abs(Math.trunc(newSeed)) || 20261025;
     }
     this.initializePopulation();
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
@@ -1326,6 +1909,7 @@ export class VrSimulatorEngine {
     if (this.currentDay >= this.capacityConfig.totalDays) {
       this.clockStatus = 'completed';
     }
+    this.notifyListeners();
     return this.getStateSnapshot();
   }
 
@@ -2859,7 +3443,18 @@ export class VrSimulatorEngine {
         ...this.totals,
         livesByFormat: { ...this.totals.livesByFormat },
       },
+      isSimulationModeActive: this.simulationModeActive,
+      topBannerStatus: this.getTopBannerStatus(),
+      manualAdvanceAuditLogs: [...this.manualAdvanceAuditHistory],
     };
+  }
+
+  public getAllSandboxLedgerEntries(): SandboxLedgerEntry[] {
+    return [...this.ledgerEntries];
+  }
+
+  public getAllSimulatedPayoutRecords(): SimulatedCreatorPayoutRecord[] {
+    return Array.from(this.simulatedPayoutRecords.values());
   }
 }
 

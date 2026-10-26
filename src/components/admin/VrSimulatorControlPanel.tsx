@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Play,
   Pause,
@@ -58,6 +58,12 @@ export const VrSimulatorControlPanel: React.FC = () => {
   const [snapshot, setSnapshot] = useState<VrSimulatorStateSnapshot>(() =>
     vrSimulatorService.getStateSnapshot()
   );
+
+  useEffect(() => {
+    return vrSimulatorService.subscribe(() => {
+      setSnapshot(vrSimulatorService.getStateSnapshot());
+    });
+  }, []);
   const [activeSubTab, setActiveSubTab] = useState<
     | 'launch_day_one'
     | 'overview'
