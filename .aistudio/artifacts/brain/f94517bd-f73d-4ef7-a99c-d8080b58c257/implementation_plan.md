@@ -1,132 +1,98 @@
-# JOBS — Visualizador de Logs de Auditoria SHA-256 (Fase 1 + Plano de Implementação)
+# Plano de Implementação Incremental — Publicação de Fotos/Vídeos, Cofre VIP e Desbloqueio Individual no JOBS
 
-Adição de um visualizador de auditoria criptográfica de baixo nível ao painel administrativo central (`CentralAdminDashboardModal`), consumindo o histórico do `ledgerService` de forma estritamente somente leitura e realizando validação determinística SHA-256 (FIPS 180-4) com verificação de encadeamento (`previousHash`).
+## 1. Diagnóstico e Evidências da Arquitetura Existente
 
-## User Review & Critical Decisions
+A auditoria realizada no repositório confirmou que o **JOBS** já possui serviços maduros e auditáveis para monetização, proteção de mídia e escrituração contábil:
 
-> [!IMPORTANT]
-> **Descoberta Crítica na Fase 1 (Auditoria Criptográfica do Ledger)**:
-> A inspeção real do repositório revelou que os registros atuais do `ledgerService` armazenam em `entryHash` o resultado de `computeSha256Simulated(input)` — um checksum bitwise de 32 bits no formato `0x<8hex>7f8e9a2b<8hex>` (26 caracteres), e **não** um digest SHA-256 real de 64 caracteres hexadecimais. Paralelamente, o repositório já possui uma implementação pura e determinística de **SHA-256 real (FIPS 180-4, 64 hex)** e **serialização JSON canônica** (`canonicalJsonStringify` + `sha256` em `cryptoAudit`).
->
-> Para cumprir rigorosamente a Fase 4 (*"Nunca converta ausência de referência em status válido"* e *"Se os dados existentes ainda não tiverem hash de referência, documente isso claramente e implemente compatibilidade incremental sem alterar silenciosamente registros históricos"*):
-> - **Registros Legados / Pré-existentes (apenas `0x...7f8e9a2b...`)**: Serão classificados honestamente como **`UNAVAILABLE`** (Ausente de Referência SHA-256 de 64 hex) para a validação SHA-256 real, exibindo o hash SHA-256 canônico recém-calculado para inspeção técnica e informando separadamente a integridade do checksum legado (`0x...`) e do encadeamento `previousHash`. Nenhum registro histórico será reescrito silenciosamente.
-> - **Novas Transações Atômicas (Compatibilidade Incremental)**: Passarão a gravar também `sha256ReferenceHash` (64 hex reais calculados sobre o payload canônico `v1-canonical-sha256`), mantendo `entryHash` intacto para 100% de retrocompatibilidade com os testes existentes. Essas entradas terão validação **`VALID`** (ou **`MISMATCH`** se adulteradas).
-
-- **Decisão Confirmada 1 — Protocolo Canônico `v1-canonical-sha256`**: Ordenação lexicográfica determinística de chaves via `canonicalJsonStringify` sobre os campos imutáveis da entrada contábil (`id`, `idempotencyKey`, `transactionId`, `timestamp`, `operationType`, `debitAccount`, `creditAccount`, `amountCents`, `currency`, `status`, `actorId`, `targetCreatorId`, `referenceId`, `isSandbox`, `previousHash`), excluindo os próprios campos de assinatura (`entryHash`, `sha256ReferenceHash`, `sha256ProtocolVersion`).
-- **Decisão Confirmada 2 — Zero Mutação e Zero Dependências Externas**: O visualizador opera em modo estritamente somente leitura sobre `financialLedger.queryLedger()`, reutilizando o motor criptográfico existente do projeto e `lucide-react`.
-
----
-
-## Fase 1 — Inventário da Auditoria do Código (Concluída sem Alteração de Arquivos)
-
-1. **Localização e Estrutura do `CentralAdminDashboardModal`**:
-   - **Evidência**: Componente principal do painel administrativo com 9 seções modulares. A Seção 9 (`activeSection === 'security'`) possui sub-abas controladas pelo estado `securitySubTab` (`'admin_activity' | 'crypto_ledger' | 'events'`), renderizando atualmente `AdminActivityLog`, `AuditLedgerReport` e a matriz de eventos/RBAC.
-   - **Integração Mínima**: Adição da sub-aba `'sha256_audit_viewer'` (*"Logs SHA-256 (Baixo Nível)"*) na Seção 9 (`security`).
-2. **Consulta ao Histórico no `ledgerService`**:
-   - **Evidência**: O singleton `financialLedger` (`FinancialLedgerService`) expõe `queryLedger(params: LedgerQueryParams): LedgerQueryResult` (suportando paginação `page`/`pageSize`, filtros por `search`, `operationType`, `status`, `currency`, `actorId`, `targetCreatorId`, `startDate`, `endDate`, `idempotencyKey`), além de `getAllEntriesRaw()`, `verifyChainIntegrity()` e `subscribe(listener)`.
-3. **Modelos Reais de Transação, Estados, Datas, Valores e Identificadores**:
-   - **Modelo (`LedgerEntry`)**:
-     - Identificadores: `id` (`string`, ex.: `ledg_...`), `idempotencyKey` (`string`), `transactionId?` (`string`), `referenceId?` (`string`), `actorId` (`string`), `targetCreatorId?` (`string`).
-     - Data/Hora: `timestamp` (`string` ISO-8601 UTC).
-     - Tipo de Operação (`LedgerOperationType`): `'credit_purchase' | 'gift_send' | 'paid_chat_message' | 'content_unlock' | 'live_ticket_purchase' | 'live_pass_purchase' | 'platform_commission' | 'creator_earning_credit' | 'withdrawal_request' | 'withdrawal_settlement' | 'withdrawal_reversal' | 'refund_credit' | 'manual_adjustment' | 'initial_migration'`.
-     - Contas de Partida Dobrada (`LedgerAccountCode`): `USER_WALLET_CREDITS`, `CREATOR_AVAILABLE_BRL`, `CREATOR_PENDING_BRL`, `PLATFORM_REVENUE_BRL`, `PLATFORM_TREASURY_CREDITS`, `EXTERNAL_PAYMENT_GATEWAY`, `WITHDRAWAL_ESCROW_BRL`, `SYSTEM_ADJUSTMENT_EQUITY`.
-     - Valores e Moeda: `amount` (`number`), `amountCents?` (`number` inteiro em centavos/unidades mínimas), `currency` (`'CREDITS' | 'BRL'`).
-     - Status Contábil (`LedgerEntryStatus`): `'posted' | 'pending' | 'voided' | 'refunded'`.
-     - Ambiente: `isSandbox` (`boolean` — distingue `sandbox` de `production`), mais `metadata?.environment`.
-4. **Hashes Existentes, Referência e Encadeamento Criptográfico**:
-   - Cada `LedgerEntry` possui `previousHash` (`string`) e `entryHash` (`string`).
-   - O `entryHash` atual é gerado por `computeSha256Simulated(input)` (`0x${hex}7f8e9a2b${hex}` — checksum simulado de 32 bits, 26 caracteres).
-   - O projeto já dispõe de SHA-256 real (FIPS 180-4, 64 caracteres hexadecimais minúsculos) e `canonicalJsonStringify` no utilitário de auditoria criptográfica (`cryptoAudit`), atualmente usado pelo `adminAuditService`.
-5. **Onde e Quando os Hashes são Criados e Armazenados**:
-   - Criados no momento da gravação em `_postTransactionAtomicDirect` (`ledgerService`), na entrada gênesis (`createGenesisEntry`) e nas entradas de seed (`ensureInitialLiveAuditEntries`).
-   - Persistidos no `localStorage` sob a chave `jobs_financial_ledger_entries_v1` (com fallback em memória `memoryStorageFallback`).
-6. **Persistência, Permissões Administrativas e Testes Existentes**:
-   - **Persistência**: `localStorage` (`jobs_financial_ledger_entries_v1` para o ledger financeiro; `jobs_admin_audit_logs_v2` para logs administrativos).
-   - **Permissões**: O `CentralAdminDashboardModal` opera sob perfil administrativo e registra sessões via `adminAuditService` (papéis `'admin' | 'auditor' | 'security' | 'master'`). O novo visualizador validará explicitamente a permissão de leitura do operador antes de exibir payloads sensíveis.
-   - **Testes Existentes**: Suite executada via `npm test` (`tsx scripts/runVerificationTests.ts`), cobrindo `ledgerService.test.ts`, `ledgerContentUnlockAudit.test.ts`, `adminAuditService.test.ts` e `revenueSimulatorService.test.ts`.
-7. **Componentes de Tabela, Filtros e Paginação Disponíveis**:
-   - `AuditLedgerReport` e `AdminActivityLog` já estabelecem o padrão visual dark-first (`bg-[#0B0F17]`, bordas `border-white/10`, fontes mono para hashes/IDs, paginação controlada e modal de inspeção técnica).
+- **`/src/services/exclusiveContentAndInterestService.ts`**:
+  - Catálogo oficial em **Diamantes (`💎`)** (`INITIAL_DIAMOND_SERVICE_CATALOG`):
+    - **Desbloqueio Individual de Foto (`INDIVIDUAL_PHOTO_UNLOCK`)**: **`49 💎`**
+    - **Desbloqueio Individual de Vídeo (`INDIVIDUAL_VIDEO_UNLOCK`)**: **`99 💎`**
+    - **Acesso ao Cofre VIP (`VIP_VAULT_ACCESS`)**: **`149 💎`** por **30 dias** (`vipVaultDurationDays: 30`), sem cobrança recorrente automática e independente de itens avulsos (`INDIVIDUAL_UNLOCK`).
+  - Métodos existentes que serão **reutilizados integralmente**:
+    - `publishOrCreateMedia(...)`
+    - `configureVipVault(...)` e `getCreatorVipVaultConfig(...)`
+    - `purchaseIndividualMediaUnlock(...)` e `purchaseVipVaultAccess(...)`
+    - `listPublicMediaForProfile(...)` e `getSignedMediaDelivery(...)`
+    - `getCreatorEarningsStatement(...)` e `getDiamondWallet(...)`
+- **`/src/services/ledgerService.ts` (`financialLedger`)**:
+  - Escrituração imutável em centavos (`integer cents`), cadeia de hash SHA-256, chave de idempotência (`idempotencyKey`), separação entre `purchasedDiamonds` (`1 💎 = 10 centavos` internos) e `bonusDiamonds` (`0 centavos`), e split oficial **70% Criador / 20% Receita JOBS / 10% Reserva Operacional** (30% comissão total da plataforma).
+- **`/src/services/protectedMediaService.ts`**:
+  - Emissão de URLs temporárias assinadas (`SignedTemporaryMediaDelivery`, TTL de 15 minutos) e ocultação de `privateMasterUrl` nas listagens públicas.
+- **Lacunas identificadas que serão endereçadas de forma incremental**:
+  1. `ExclusiveMonetizationModality` em `exclusiveContentAndInterestService.ts` suporta `'INDIVIDUAL_UNLOCK' | 'VIP_VAULT'`, faltando a modalidade explícita `'FREE'` (`0 💎`) para publicações gratuitas no perfil sem cobrança.
+  2. Falta a interface dedicada do criador (`CreatorContentStudioModal.tsx`) para publicar fotos/vídeos com prévia (`safePreviewUrl`), descrição, escolha de modalidade (`Gratuito`, `Desbloqueio Individual 49/99 💎`, `Cofre VIP`), estados de carregamento/sucesso/erro, aba `Meu Conteúdo` e configuração do `Cofre VIP`.
+  3. Em `Screen10ProfileDetail.tsx`, a visualização de mídias do perfil precisa ser organizada nas 4 abas definidas (`Gratuito`, `Exclusivo`, `Cofre VIP` e `Desbloqueados`) e exibir um **Modal de Confirmação Pré-Compra** antes de debitar diamantes.
 
 ---
 
-## 1. Overview & Core Concept
+## 2. Escopo Incremental da Solução
 
-- **What It Does**: Fornece uma bancada de inspeção criptográfica de baixo nível para auditar cada lançamento do `ledgerService`, recalculando determinísticamente o hash SHA-256 (64 hex) sobre o payload canônico da transação, confrontando-o com o hash de referência (`sha256ReferenceHash` / `entryHash`) e validando o elo `previousHash` da cadeia contábil.
-- **Target Audience / Persona**: Engenheiros de segurança, auditores financeiros e administradores master do ecossistema JOBS.
-- **Key Value**: Elimina falsos positivos de integridade ao separar claramente validações criptográficas reais SHA-256 (`VALID` / `MISMATCH`) de registros legados sem referência SHA-256 de 64 hex (`UNAVAILABLE`) e de registros com dados corrompidos (`ERROR`).
+### 2.1. Evolução de `/src/services/exclusiveContentAndInterestService.ts`
+- Expandir `ExclusiveMonetizationModality` para `'FREE' | 'INDIVIDUAL_UNLOCK' | 'VIP_VAULT'`.
+- Em `publishOrCreateMedia`:
+  - Permitir `modality: 'FREE'` com `priceDiamonds: 0`, `priceCents: 0`, `requiresIndividualUnlock: false` e `requiresVipVaultPass: false`.
+  - Manter a validação estrita dos preços oficiais fixos do catálogo (`49 💎` para fotos e `99 💎` para vídeos em `INDIVIDUAL_UNLOCK`; `0 💎` avulso em `VIP_VAULT` pois exige o passe de `149 💎 / 30 dias`).
+- Em `listPublicMediaForProfile` e `getSignedMediaDelivery`:
+  - Liberar `isUnlockedForViewer: true` e entrega assinada para itens com `modality === 'FREE'` que estejam `PUBLISHED` e `APPROVED` (respeitando bloqueios entre usuários e verificação de idade `+18`).
+- Em `purchaseIndividualMediaUnlock`:
+  - Impedir qualquer cobrança caso o item seja `modality === 'FREE'`, retornando erro claro caso acionado indevidamente.
+- Adicionar método utilitário `listCreatorOwnMedia(creatorId: string)` para que o criador consulte todas as suas publicações (incluindo itens em análise, gratuitos, exclusivos avulsos e do Cofre VIP) com contadores e preços.
+
+### 2.2. Novo Componente `/src/components/CreatorContentStudioModal.tsx`
+- Central de criação e gestão de conteúdo do perfil/criador com navegação clara entre:
+  - **Publicar Foto** e **Publicar Vídeo**:
+    - Seleção de arquivo local (com leitura segura em Data URL / Object URL) ou URL de mídia, prévia visual imediata (`safePreviewUrl` + prévia da mídia), título, descrição/legenda, classificação (`sensual`, `fashion_lingerie`, `consensual_nudity_18plus`) e declarações obrigatórias de maioridade (`+18`) e consentimento.
+    - Escolha da modalidade:
+      - **Conteúdo Gratuito (`0 💎`)**
+      - **Conteúdo Exclusivo / Desbloqueio Individual (`49 💎` Foto / `99 💎` Vídeo)**
+      - **Cofre VIP (incluso no Passe de 30 dias — `149 💎`)**
+    - Estados explícitos de **Carregando**, **Publicação Concluída** (somente após persistência confirmada no serviço) e **Erro**.
+  - **Meu Conteúdo**:
+    - Listagem e filtros por modalidade (`Todos`, `Conteúdo Gratuito`, `Exclusivo / Pago`, `Cofre VIP`), exibindo status (`Publicado`, `Em análise`, `Rejeitado`), modalidade, preço em `💎` e total de desbloqueios.
+  - **Cofre VIP**:
+    - Configuração do título, descrição e status ativo do Cofre VIP do criador (`configureVipVault`), listagem dos itens vinculados ao Cofre VIP e transparência sobre o passe de 30 dias (`149 💎`, sem renovação automática).
+
+### 2.3. Evolução de `/src/components/screens/Screen10ProfileDetail.tsx`
+- Organizar a vitrine de conteúdos do perfil nas **4 abas selecionadas**:
+  1. **Gratuito** (`modality === 'FREE'`)
+  2. **Exclusivo** (`modality === 'INDIVIDUAL_UNLOCK'`)
+  3. **Cofre VIP** (`modality === 'VIP_VAULT'`)
+  4. **Desbloqueados** (todos os itens já liberados ou adquiridos pelo visitante atual)
+- Implementar **Modal de Confirmação Pré-Compra** antes de efetivar qualquer cobrança (`Desbloqueio Individual` de `49 💎` / `99 💎` ou `Passe Cofre VIP` de `149 💎`), apresentando:
+  - Título, descrição e tipo da mídia/acesso;
+  - Preço oficial em `💎`;
+  - Saldo disponível atual do usuário em `💎` e saldo projetado após a compra;
+  - Regra de acesso (vitalício para item avulso enquanto disponível na plataforma; 30 dias corridos sem renovação automática para Cofre VIP);
+  - Botões de **Cancelar** e **Confirmar Desbloqueio**.
+- Incluir botão de acesso rápido ao **Estúdio de Conteúdo & Cofre VIP** (`CreatorContentStudioModal`).
+
+### 2.4. Atalhos no Próprio Perfil, Dashboard e Configurações
+- **`/src/components/screens/Screen06ProfileCreation.tsx`**: botão/card para abrir o Estúdio de Publicação (`Publicar foto`, `Publicar vídeo`, `Meu conteúdo`, `Cofre VIP`) diretamente na tela de edição do próprio perfil.
+- **`/src/components/screens/Screen08HomeDashboard.tsx`**: atalho rápido no Dashboard para `Meu Conteúdo & Cofre VIP`.
+- **`/src/components/screens/Screen16Settings.tsx`**: atalho na seção de conta/criador para gerenciar publicações e Cofre VIP.
+- **`/src/App.tsx`**: integração do estado global do modal `CreatorContentStudioModal` para abertura a partir do Perfil, Dashboard ou Configurações.
+
+### 2.5. Testes Automatizados de Segurança e Integridade Financeira
+- Criar `/src/services/__tests__/creatorContentAndVipVault.test.ts` e registrá-lo em `/scripts/runVerificationTests.ts` cobrindo:
+  1. Publicação de foto e vídeo nas modalidades `FREE`, `INDIVIDUAL_UNLOCK` (`49 💎` / `99 💎`) e `VIP_VAULT`;
+  2. Acesso imediato e sem cobrança a conteúdo `FREE` e bloqueio de tentativa de cobrança em item gratuito;
+  3. Desbloqueio individual com saldo suficiente e verificação do split **70% criador / 20% JOBS / 10% reserva** no `financialLedger`;
+  4. Bloqueio de compra com saldo insuficiente sem alterar carteira ou ledger;
+  5. Idempotência e prevenção de cobrança duplicada para o mesmo item já desbloqueado;
+  6. Proteção de `privateMasterUrl` contra acesso não autorizado em itens `INDIVIDUAL_UNLOCK` e `VIP_VAULT`;
+  7. Isolamento entre diamantes de simulação/bônus e compras auditadas no ledger.
 
 ---
 
-## 2. User Experience & Visual Design
+## 3. Arquivos que Serão Afetados
 
-- **Key User Flows**:
-  1. O administrador acessa **Segurança & Auditoria (Seção 9)** no `CentralAdminDashboardModal` e seleciona a sub-aba **Visualizador SHA-256 (Baixo Nível)**.
-  2. No topo, cartões de telemetria exibem os contadores da página/consulta atual: Total Auditado, `VALID` (Íntegro SHA-256), `MISMATCH` (Divergência Criptográfica), `UNAVAILABLE` (Legado sem Referência SHA-256 64-hex), `ERROR` (Payload Inválido) e Status do Elo (`previousHash`).
-  3. O operador filtra por período (`startDate` / `endDate`), tipo de operação, status contábil (`posted`, `pending`, `voided`, `refunded`), status de validação SHA-256 (`VALID`, `MISMATCH`, `UNAVAILABLE`, `ERROR`), ambiente (`production` vs `sandbox`) ou busca textual (`id`, `transactionId`, `idempotencyKey`, `actorId`, hash).
-  4. Na tabela de logs, cada linha apresenta truncamento seguro com botão de cópia (`Copy`) para IDs e hashes, além de badges semânticos com ícone + texto para acessibilidade.
-  5. Ao clicar em **Inspecionar**, abre-se o painel/modal de detalhes técnicos contendo o JSON canônico exato (`canonicalPayload`), o Hash SHA-256 Calculado (64 hex), o Hash SHA-256 de Referência (quando presente), o Checksum Legado (`entryHash`), o `previousHash` esperado vs. armazenado e o diagnóstico completo.
-- **Visual Identity & Theme**:
-  - *Aesthetic Direction*: Utilitário forense de alta precisão, coerente com o tema escuro do `CentralAdminDashboardModal`.
-  - *Color Palette & Mood*: Superfícies `bg-[#0B0F17]` e `bg-[#111726]`, bordas `border-white/10`, indicadores semânticos acessíveis (`emerald` para `VALID`, `rose` para `MISMATCH`, `amber` para `UNAVAILABLE`, `red/purple` para `ERROR`).
-  - *Typography & Hierarchy*: `Inter` para rótulos e controles; `JetBrains Mono` / `font-mono` com `tabular-nums` para valores monetários, timestamps ISO-8601, chaves de idempotência e digests de 64 caracteres.
-
----
-
-## 3. Key Product Decisions & Trade-Offs
-
-- **Decision 1 — Compatibilidade Incremental sem Reescrita Silenciosa do Passado**:
-  - *Chosen Approach*: Preservar `entryHash` (`0x...`) intacto em todas as entradas e adicionar `sha256ReferenceHash` (64 hex SHA-256 real) + `sha256ProtocolVersion: 'v1-canonical-sha256'` em novas transações gravadas por `_postTransactionAtomicDirect`. Entradas legadas que possuem apenas `0x...` recebem status `UNAVAILABLE` na coluna de validação SHA-256 real (com diagnóstico auxiliar do checksum legado), nunca sendo convertidas artificialmente em `VALID`.
-  - *Why*: Cumpre estritamente a regra da Fase 4 (*"Nunca converta ausência de referência em status válido"* e *"sem alterar silenciosamente registros históricos"*), mantendo 100% dos testes legados passando.
-- **Decision 2 — Paginação Controlada + Validação Sob Demanda**:
-  - *Chosen Approach*: Consumir `financialLedger.queryLedger({ page, pageSize, ... })` com lotes enxutos (ex.: 15 ou 25 registros por página) e validar o lote visível + verificação de elo `previousHash` com memoização determinística.
-  - *Why*: Evita bloquear a thread principal ou carregar/re-hashear milhares de entradas desnecessariamente a cada renderização.
-
----
-
-## 4. Technical Architecture & Data Strategy
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                   CentralAdminDashboardModal (Seção 9)                     │
-│  Sub-abas: [AdminActivityLog] | [AuditLedgerReport] | [LedgerSha256Viewer] │
-└─────────────────────────────────────────┬──────────────────────────────────┘
-                                          │ (Somente Leitura)
-                                          ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│                        LedgerSha256AuditViewer                             │
-│  • Filtros: Período, OperationType, Status Contábil, Status SHA-256,       │
-│             Ambiente (Prod/Sandbox), Busca livre (ID / Hash / Idempotency) │
-│  • Tabela Paginada com Badges Acessíveis (Ícone + Texto) + Cópia Segura    │
-│  • Painel Técnico de Inspeção (Payload Canônico, SHA-256 64-hex, Cadeia)   │
-└───────────────────┬─────────────────────────────────────┬──────────────────┘
-                    │                                     │
-                    ▼                                     ▼
-┌───────────────────────────────────────┐ ┌──────────────────────────────────┐
-│     financialLedger (ledgerService)   │ │      ledgerSha256Validator       │
-│  • queryLedger(params)                │ │  • buildCanonicalLedgerPayload() │
-│  • getEntryById(id)                   │ │  • calculateLedgerSha256()       │
-│  • Gravação incremental de            │ │  • validateLedgerEntrySha256()   │
-│    sha256ReferenceHash em novas tx    │ │  • validateLedgerBatchSha256()   │
-└───────────────────────────────────────┘ └───────────────┬──────────────────┘
-                                                          │
-                                                          ▼
-                                          ┌──────────────────────────────────┐
-                                          │     cryptoAudit (FIPS 180-4)     │
-                                          │  • canonicalJsonStringify()      │
-                                          │  • sha256() -> 64 hex chars      │
-                                          └──────────────────────────────────┘
-```
-
-### Data Model & Validation States (`LedgerSha256ValidationResult`)
-
-- **`status: 'VALID' | 'MISMATCH' | 'UNAVAILABLE' | 'ERROR'`**:
-  - **`VALID`**: O registro possui hash de referência SHA-256 de 64 hex (`sha256ReferenceHash` ou `entryHash` em formato 64-hex), o `calculatedSha256Hash` coincide exatamente com o hash de referência, e o elo `previousHash` (quando o registro anterior está disponível) é íntegro.
-  - **`MISMATCH`**: O `calculatedSha256Hash` diverge do hash de referência SHA-256 armazenado, **ou** o checksum legado `entryHash` (`0x...`) foi adulterado em relação aos dados da entrada, **ou** há quebra confirmada no encadeamento `previousHash`.
-  - **`UNAVAILABLE`**: Os campos obrigatórios são válidos e o `calculatedSha256Hash` (64 hex) foi calculado com sucesso, porém o registro é legado/pré-migração e não possui `sha256ReferenceHash` (64 hex) para comparação criptográfica SHA-256 (possuindo apenas checksum simulado `0x...` íntegro ou ausente).
-  - **`ERROR`**: Campos obrigatórios ausentes/corrompidos (`id` vazio, `timestamp` inválido, `amount` `NaN`/negativo, `currency` inválida) que impedem a construção determinística do payload canônico.
-
-### Interactive Component & State Mapping
-
-- **Verificação de Permissão RBAC**: Valida o papel do operador administrativo (`admin`, `auditor`, `security`, `master`); caso um perfil não autorizado tente renderizar o componente, exibe bloqueio seguro sem consultar nem expor dados do ledger.
-- **Mascaramento de Dados Sensíveis**: Chaves de idempotência e metadados potencialmente sensíveis são mascarados por padrão na tabela e higienizados no inspetor técnico (ocultando tokens, chaves privadas ou PII, caso presentes em `metadata`).
-- **Suite de Testes Automatizados (Fase 6)**: Cobertura integral dos 12 cenários exigidos (consistência determinística, `VALID`, `MISMATCH` por adulteração de valor/status/timestamp, `UNAVAILABLE` para ausência de referência SHA-256 64-hex, `ERROR` para payload corrompido, quebra de `previousHash`, lista vazia, erro na fonte, filtros/paginação e bloqueio de acesso não autorizado) sem tocar no banco real.
+1. `/src/services/exclusiveContentAndInterestService.ts` *(modificação incremental)*
+2. `/src/components/CreatorContentStudioModal.tsx` *(novo componente)*
+3. `/src/components/screens/Screen10ProfileDetail.tsx` *(modificação incremental — 4 abas + confirmação pré-compra + botão estúdio)*
+4. `/src/components/screens/Screen06ProfileCreation.tsx` *(modificação incremental — atalho no próprio perfil)*
+5. `/src/components/screens/Screen08HomeDashboard.tsx` *(modificação incremental — atalho no Dashboard)*
+6. `/src/components/screens/Screen16Settings.tsx` *(modificação incremental — atalho nas Configurações)*
+7. `/src/App.tsx` *(modificação incremental — conexão do `CreatorContentStudioModal`)*
+8. `/src/services/__tests__/creatorContentAndVipVault.test.ts` *(novo arquivo de testes)*
+9. `/scripts/runVerificationTests.ts` *(registro da nova suíte de testes)*

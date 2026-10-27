@@ -19,6 +19,7 @@ import { UserProfileData } from '../../types';
 interface Screen06ProfileCreationProps {
   initialData: UserProfileData;
   onSuccess: (data: Partial<UserProfileData>) => void;
+  onOpenCreatorContentStudio?: () => void;
 }
 
 const DEFAULT_SAMPLE_PHOTOS = [
@@ -31,6 +32,7 @@ const DEFAULT_SAMPLE_PHOTOS = [
 export const Screen06ProfileCreation: React.FC<Screen06ProfileCreationProps> = ({
   initialData,
   onSuccess,
+  onOpenCreatorContentStudio,
 }) => {
   const [displayName, setDisplayName] = useState(initialData.name || 'Emilio Borges');
   const [occupation, setOccupation] = useState(initialData.occupation || 'Empresário');
@@ -172,6 +174,27 @@ export const Screen06ProfileCreation: React.FC<Screen06ProfileCreationProps> = (
             <p className="text-[11px] text-slate-400">
               Fotos com boa iluminação e rosto nítido geram até 3x mais conexões compatíveis.
             </p>
+
+            {onOpenCreatorContentStudio && (
+              <div className="mt-3 p-3 rounded-2xl bg-gradient-to-r from-[#181224] to-[#12121f] border border-amber-500/30 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Publicar Foto/Vídeo, Conteúdo Exclusivo & Cofre VIP</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Configure conteúdos gratuitos (0 💎), avulsos (49/99 💎) ou Cofre VIP (149 💎)
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenCreatorContentStudio}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shrink-0 cursor-pointer"
+                >
+                  Abrir Estúdio
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Nome & Ocupação */}

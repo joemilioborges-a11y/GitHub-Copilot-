@@ -25,8 +25,10 @@ import { calculateAiCompatibility } from '../../utils/aiMatchmaking';
 import {
   exclusiveContentAndInterestService,
   formatDiamondsDisplay,
+  PublicExclusiveMediaView,
 } from '../../services/exclusiveContentAndInterestService';
 import { authService } from '../../utils/authService';
+import { CreatorContentStudioModal, CreatorStudioTab } from '../CreatorContentStudioModal';
 
 interface Screen10ProfileDetailProps {
   profile: Profile;
@@ -36,6 +38,18 @@ interface Screen10ProfileDetailProps {
   onStartChat: (profile: Profile) => void;
   onBlock: (profile: Profile) => void;
   onReport: (profile: Profile) => void;
+  onOpenCreatorStudio?: (tab?: CreatorStudioTab) => void;
+}
+
+type ProfileMediaTab = 'FREE' | 'INDIVIDUAL' | 'VIP_VAULT' | 'UNLOCKED';
+
+interface PendingPurchaseConfirmation {
+  type: 'INDIVIDUAL_MEDIA' | 'VIP_VAULT';
+  mediaItem?: PublicExclusiveMediaView;
+  title: string;
+  description: string;
+  priceDiamonds: number;
+  accessConditionText: string;
 }
 
 export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
@@ -50,8 +64,14 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
   const currentUserId = authService.getCurrentSession()?.userId || 'user_emilio_vip';
   const [photoIndex, setPhotoIndex] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [activeMediaTab, setActiveMediaTab] = useState<ProfileMediaTab>('INDIVIDUAL');
   const [showVipVaultPanel, setShowVipVaultPanel] = useState(false);
   const [showImmediateInterestModal, setShowImmediateInterestModal] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<PendingPurchaseConfirmation | null>(null);
+  const [isCreatorStudioOpen, setIsCreatorStudioOpen] = useState(false);
+  const [creatorStudioInitialTab, setCreatorStudioInitialTab] =
+    useState<CreatorStudioTab>('publish_photo');
   const [interestMessage, setInterestMessage] = useState('');
   const [feedbackBanner, setFeedbackBanner] = useState<{
     type: 'success' | 'error';
@@ -70,6 +90,16 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
   const buyerWallet = useMemo(
     () => exclusiveContentAndInterestService.getUserDiamondWallet(currentUserId),
     [currentUserId, refreshTick]
+  );
+
+  const freeMediaList = useMemo(
+    () =>
+      exclusiveContentAndInterestService.listPublicMediaForProfile({
+        creatorId: profile.id,
+        viewerUserId: currentUserId,
+        modality: 'FREE',
+      }),
+    [profile.id, currentUserId, refreshTick]
   );
 
   const individualMediaList = useMemo(
@@ -92,6 +122,14 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
     [profile.id, currentUserId, refreshTick]
   );
 
+  const unlockedMediaList = useMemo(
+    () =>
+      [...freeMediaList, ...individualMediaList, ...vipVaultMediaList].filter(
+        (item) => item.isUnlockedForViewer
+      ),
+    [freeMediaList, individualMediaList, vipVaultMediaList]
+  );
+
   const vaultConfig = useMemo(
     () => exclusiveContentAndInterestService.getVipVaultConfig(profile.id),
     [profile.id, refreshTick]
@@ -109,8 +147,33 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
 
   const interestPriceDiamonds = exclusiveContentAndInterestService.getImmediateInterestPriceDiamonds();
 
+  const requestIndividualMediaConfirmation = (item: PublicExclusiveMediaView) => {
+    setFeedbackBanner(null);
+    setPendingConfirmation({
+      type: 'INDIVIDUAL_MEDIA',
+      mediaItem: item,
+      title: `Desbloquear ${item.mediaType === 'video' ? 'Vídeo Exclusivo' : 'Foto Exclusiva'}`,
+      description: item.caption,
+      priceDiamonds: item.priceDiamonds,
+      accessConditionText:
+        'Desbloqueio único individual para este conteúdo específico (independente do Cofre VIP), com entrega via URL temporária assinada.',
+    });
+  };
+
+  const requestVipVaultConfirmation = () => {
+    setFeedbackBanner(null);
+    setPendingConfirmation({
+      type: 'VIP_VAULT',
+      title: `Desbloquear ${vaultConfig.title}`,
+      description: vaultConfig.description,
+      priceDiamonds: vaultConfig.priceDiamonds,
+      accessConditionText: `Passe válido por ${vaultConfig.durationDays} dias corridos para todas as mídias do Cofre VIP deste perfil. Sem renovação automática e independente de mídias avulsas.`,
+    });
+  };
+
   const handleUnlockIndividualMedia = async (mediaId: string) => {
     setFeedbackBanner(null);
+    setPendingConfirmation(null);
     try {
       const res = await exclusiveContentAndInterestService.purchaseIndividualMediaUnlock({
         buyerUserId: currentUserId,
@@ -142,6 +205,7 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
 
   const handlePurchaseVipVault = async () => {
     setFeedbackBanner(null);
+    setPendingConfirmation(null);
     try {
       const res = await exclusiveContentAndInterestService.purchaseVipVaultAccess({
         buyerUserId: currentUserId,
@@ -163,6 +227,29 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
       setFeedbackBanner({
         type: 'error',
         text: err?.message || 'Erro ao adquirir Cofre VIP.',
+      });
+    }
+  };
+
+  const handleViewFreeOrUnlockedMedia = (item: PublicExclusiveMediaView) => {
+    setFeedbackBanner(null);
+    const res = exclusiveContentAndInterestService.requestSignedMediaDelivery({
+      requesterUserId: currentUserId,
+      mediaId: item.id,
+    });
+    if (res.allowed && res.delivery) {
+      setActiveSignedUrlByMediaId((prev) => ({
+        ...prev,
+        [item.id]: res.delivery!.signedTemporaryUrl,
+      }));
+      setFeedbackBanner({
+        type: 'success',
+        text: `Visualização protegida autorizada para "${item.caption}" (sem cobrança adicional).`,
+      });
+    } else {
+      setFeedbackBanner({
+        type: 'error',
+        text: res.reason,
       });
     }
   };
@@ -249,6 +336,17 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
           </button>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setCreatorStudioInitialTab('publish_photo');
+                setIsCreatorStudioOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-full bg-rose-600/90 hover:bg-rose-500 text-white text-[11px] font-bold border border-white/15 flex items-center gap-1.5 cursor-pointer shadow-lg"
+              title="Publicar fotos, vídeos ou configurar Cofre VIP"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Publicar & Cofre VIP</span>
+            </button>
             <button
               onClick={() => onReport(profile)}
               className="p-2 rounded-full bg-black/60 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-white/10 transition-colors cursor-pointer"
@@ -354,7 +452,7 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
             </div>
           )}
 
-          {/* Barra de Saldo da Carteira de Diamantes */}
+          {/* Barra de Saldo da Carteira de Diamantes + Atalhos de Criação */}
           <div className="p-3 rounded-2xl bg-[#141424] border border-amber-500/30 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2">
               <span className="text-amber-300 font-extrabold">Sua Carteira JOBS:</span>
@@ -362,201 +460,489 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
                 {formatDiamondsDisplay(buyerWallet.totalAvailableDiamonds)}
               </span>
             </div>
-            <div className="text-[11px] text-slate-400 font-mono">
-              Comprados: {buyerWallet.purchasedDiamonds} 💎 · Bônus: {buyerWallet.bonusDiamonds} 💎
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400 font-mono">
+                Comprados: {buyerWallet.purchasedDiamonds} 💎 · Bônus: {buyerWallet.bonusDiamonds} 💎
+              </span>
+              <button
+                onClick={() => {
+                  setCreatorStudioInitialTab('my_content');
+                  setIsCreatorStudioOpen(true);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] cursor-pointer"
+              >
+                Meu Conteúdo
+              </button>
             </div>
           </div>
 
           {/* ================================================================= */}
-          {/* SEÇÃO 1: COFRE VIP INDEPENDENTE ("Ver Cofre VIP")                 */}
+          {/* MODAL DE CONFIRMAÇÃO PRÉ-COMPRA EM DIAMANTES (💎)                 */}
           {/* ================================================================= */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#191522] to-[#110f19] border border-amber-500/40 shadow-xl space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                {hasVipVaultAccess ? (
-                  <Unlock className="w-5 h-5 text-emerald-400" />
-                ) : (
-                  <Lock className="w-5 h-5 text-amber-400" />
-                )}
-                <div>
-                  <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-                    <span>{vaultConfig.title}</span>
-                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      +18 Consentido
-                    </span>
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    {formatDiamondsDisplay(vaultConfig.priceDiamonds)} · Validade de {vaultConfig.durationDays} dias ·{' '}
-                    {vipVaultMediaList.length} mídias no cofre (independente de mídias avulsas)
-                  </p>
+          {pendingConfirmation && (
+            <div className="p-4 sm:p-5 rounded-2xl bg-[#181224] border-2 border-amber-500/60 shadow-2xl space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-amber-400" />
+                  <h4 className="text-sm font-extrabold text-white">
+                    Confirmar Desbloqueio em Diamantes
+                  </h4>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-mono text-xs font-extrabold border border-amber-500/40">
+                  {formatDiamondsDisplay(pendingConfirmation.priceDiamonds)}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-black/40 border border-white/10 space-y-1.5 text-xs">
+                <div className="font-bold text-white">{pendingConfirmation.title}</div>
+                <div className="text-slate-300">{pendingConfirmation.description}</div>
+                <div className="text-[11px] text-amber-200 pt-1">
+                  <strong>Condição de acesso:</strong> {pendingConfirmation.accessConditionText}
                 </div>
               </div>
 
-              <button
-                onClick={() => setShowVipVaultPanel((prev) => !prev)}
-                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                <span>{showVipVaultPanel ? 'Ocultar Cofre VIP' : 'Ver Cofre VIP'}</span>
-              </button>
+              <div className="grid grid-cols-3 gap-2 text-center text-[11px] font-mono">
+                <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                  <span className="block text-slate-400">Preço Oficial</span>
+                  <strong className="text-amber-300">
+                    {formatDiamondsDisplay(pendingConfirmation.priceDiamonds)}
+                  </strong>
+                </div>
+                <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                  <span className="block text-slate-400">Saldo Atual</span>
+                  <strong className="text-white">
+                    {formatDiamondsDisplay(buyerWallet.totalAvailableDiamonds)}
+                  </strong>
+                </div>
+                <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                  <span className="block text-slate-400">Saldo Após Compra</span>
+                  <strong
+                    className={
+                      buyerWallet.totalAvailableDiamonds >= pendingConfirmation.priceDiamonds
+                        ? 'text-emerald-400'
+                        : 'text-rose-400'
+                    }
+                  >
+                    {buyerWallet.totalAvailableDiamonds >= pendingConfirmation.priceDiamonds
+                      ? formatDiamondsDisplay(
+                          buyerWallet.totalAvailableDiamonds - pendingConfirmation.priceDiamonds
+                        )
+                      : 'Saldo Insuficiente'}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingConfirmation(null)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      pendingConfirmation.type === 'INDIVIDUAL_MEDIA' &&
+                      pendingConfirmation.mediaItem
+                    ) {
+                      handleUnlockIndividualMedia(pendingConfirmation.mediaItem.id);
+                    } else if (pendingConfirmation.type === 'VIP_VAULT') {
+                      handlePurchaseVipVault();
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-extrabold text-xs cursor-pointer"
+                >
+                  Confirmar e Desbloquear ({formatDiamondsDisplay(pendingConfirmation.priceDiamonds)})
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ================================================================= */}
+          {/* VITRINE DE CONTEÚDO EM 4 ABAS: GRATUITO, EXCLUSIVO, COFRE VIP, DESBLOQUEADOS */}
+          {/* ================================================================= */}
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveMediaTab('FREE')}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    activeMediaTab === 'FREE'
+                      ? 'bg-emerald-500 text-slate-950 shadow-lg'
+                      : 'bg-[#141422] text-emerald-300 border border-emerald-500/30 hover:bg-emerald-950/40'
+                  }`}
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span>Gratuito ({freeMediaList.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveMediaTab('INDIVIDUAL')}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    activeMediaTab === 'INDIVIDUAL'
+                      ? 'bg-rose-600 text-white shadow-lg'
+                      : 'bg-[#141422] text-rose-300 border border-rose-500/30 hover:bg-rose-950/40'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Exclusivo ({individualMediaList.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveMediaTab('VIP_VAULT');
+                    setShowVipVaultPanel(true);
+                  }}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    activeMediaTab === 'VIP_VAULT'
+                      ? 'bg-amber-500 text-slate-950 shadow-lg'
+                      : 'bg-[#141422] text-amber-300 border border-amber-500/30 hover:bg-amber-950/40'
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Cofre VIP ({vipVaultMediaList.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveMediaTab('UNLOCKED')}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    activeMediaTab === 'UNLOCKED'
+                      ? 'bg-indigo-500 text-white shadow-lg'
+                      : 'bg-[#141422] text-indigo-300 border border-indigo-500/30 hover:bg-indigo-950/40'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Desbloqueados ({unlockedMediaList.length})</span>
+                </button>
+              </div>
             </div>
 
-            {showVipVaultPanel && (
-              <div className="pt-3 border-t border-white/10 space-y-3">
-                <p className="text-xs text-slate-300 leading-relaxed">{vaultConfig.description}</p>
-                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-200">
-                  <strong>Escopo e Condições:</strong> {vaultConfig.scopeDescription}
+            {/* ABA 1: CONTEÚDO GRATUITO */}
+            {activeMediaTab === 'FREE' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-300">
+                      Conteúdo Gratuito do Perfil
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Fotos e vídeos abertos publicados por {profile.name} (0 💎 · sem cobrança)
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded">
+                    Acesso Livre (0 💎)
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {vipVaultMediaList.map((item) => (
+                {freeMediaList.length === 0 ? (
+                  <div className="p-6 rounded-2xl bg-[#11111c] border border-white/10 text-center text-xs text-slate-400">
+                    Nenhum conteúdo gratuito publicado ainda neste perfil.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {freeMediaList.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl overflow-hidden bg-[#11111c] border border-emerald-500/30 flex flex-col justify-between"
+                      >
+                        <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
+                          <img
+                            src={item.safePreviewUrl}
+                            alt={item.caption}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute top-2.5 left-2.5">
+                            <span className="px-2 py-0.5 rounded bg-black/80 text-emerald-300 text-[10px] font-bold uppercase flex items-center gap-1">
+                              {item.mediaType === 'video' ? (
+                                <Video className="w-3 h-3" />
+                              ) : (
+                                <Camera className="w-3 h-3" />
+                              )}
+                              {item.mediaType === 'video' ? 'Vídeo Gratuito' : 'Foto Gratuita'}
+                            </span>
+                          </div>
+                          <div className="absolute top-2.5 right-2.5">
+                            <span className="px-2 py-0.5 rounded bg-emerald-600/90 text-white font-mono text-[11px] font-extrabold">
+                              0 💎
+                            </span>
+                          </div>
+                        </div>
+                        <div className="p-3.5 space-y-2">
+                          <p className="text-xs font-semibold text-white">{item.caption}</p>
+                          <button
+                            type="button"
+                            onClick={() => handleViewFreeOrUnlockedMedia(item)}
+                            className="w-full py-2 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>
+                              {activeSignedUrlByMediaId[item.id]
+                                ? 'Visualização Ativa (0 💎)'
+                                : 'Visualizar Conteúdo Gratuito'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ABA 2: CONTEÚDO EXCLUSIVO / DESBLOQUEIO INDIVIDUAL */}
+            {activeMediaTab === 'INDIVIDUAL' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Fotos e Vídeos com Desbloqueio Individual
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Cada item avulso possui preço próprio em diamantes (independente do Cofre VIP)
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono text-amber-300 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded">
+                    Foto {formatDiamondsDisplay(catalog.individualPhotoUnlockDiamonds)} · Vídeo{' '}
+                    {formatDiamondsDisplay(catalog.individualVideoUnlockDiamonds)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {individualMediaList.map((item) => (
                     <div
                       key={item.id}
-                      className="rounded-xl overflow-hidden border border-white/10 bg-slate-950 flex flex-col"
+                      className="rounded-2xl overflow-hidden bg-[#11111c] border border-white/10 flex flex-col justify-between"
                     >
                       <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
                         <img
                           src={item.safePreviewUrl}
                           alt={item.caption}
                           className={`w-full h-full object-cover transition-all ${
-                            item.isUnlockedForViewer ? '' : 'blur-lg scale-110 brightness-75'
+                            item.isUnlockedForViewer ? '' : 'blur-md scale-105 brightness-75'
                           }`}
                         />
-                        <div className="absolute top-2 left-2 flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded bg-black/80 text-amber-300 text-[10px] font-bold uppercase flex items-center gap-1">
+                        <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded bg-black/80 text-white text-[10px] font-bold uppercase flex items-center gap-1">
                             {item.mediaType === 'video' ? (
-                              <Video className="w-3 h-3" />
+                              <Video className="w-3 h-3 text-rose-400" />
                             ) : (
-                              <Camera className="w-3 h-3" />
+                              <Camera className="w-3 h-3 text-amber-400" />
                             )}
-                            {item.mediaType === 'video' ? 'Vídeo Cofre VIP' : 'Foto Cofre VIP'}
+                            {item.mediaType === 'video' ? 'Vídeo Exclusivo' : 'Foto Exclusiva'}
+                          </span>
+                        </div>
+                        <div className="absolute top-2.5 right-2.5">
+                          <span className="px-2 py-0.5 rounded bg-rose-600/90 text-white font-mono text-[11px] font-extrabold">
+                            {formatDiamondsDisplay(item.priceDiamonds)}
                           </span>
                         </div>
                       </div>
-                      <div className="p-3 space-y-1.5">
-                        <p className="text-xs font-semibold text-white">{item.caption}</p>
-                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                          <span>Status: {item.isUnlockedForViewer ? 'Liberado' : 'Incluso no Cofre VIP'}</span>
-                          <span>+18 Verificado</span>
+
+                      <div className="p-3.5 space-y-2.5">
+                        <p className="text-xs font-semibold text-white leading-snug">{item.caption}</p>
+                        <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between">
+                          <span>Desbloqueio Único Individual</span>
+                          <span>Independente do Cofre VIP</span>
                         </div>
+
+                        {item.isUnlockedForViewer ? (
+                          <div className="p-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center justify-between">
+                            <span className="font-semibold flex items-center gap-1">
+                              <Unlock className="w-3.5 h-3.5" />
+                              Desbloqueado
+                            </span>
+                            <span className="font-mono text-[10px] truncate max-w-[140px]">
+                              {activeSignedUrlByMediaId[item.id] ? 'Token Assinado Ativo' : 'Acesso Confirmado'}
+                            </span>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => requestIndividualMediaConfirmation(item)}
+                            className="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>
+                              Desbloquear {item.mediaType === 'video' ? 'Vídeo' : 'Foto'} (
+                              {formatDiamondsDisplay(item.priceDiamonds)})
+                            </span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
 
-                {!hasVipVaultAccess ? (
-                  <div className="p-3 rounded-xl bg-black/40 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="space-y-0.5">
-                      <div className="text-xs font-bold text-white">
-                        Acesso ao Cofre VIP: {formatDiamondsDisplay(vaultConfig.priceDiamonds)} · {vaultConfig.durationDays} dias
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        Inclui todas as {vipVaultMediaList.length} mídias do Cofre VIP. Não inclui fotos/vídeos avulsos.
-                      </div>
+            {/* ABA 3: COFRE VIP INDEPENDENTE */}
+            {activeMediaTab === 'VIP_VAULT' && (
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#191522] to-[#110f19] border border-amber-500/40 shadow-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {hasVipVaultAccess ? (
+                      <Unlock className="w-5 h-5 text-emerald-400" />
+                    ) : (
+                      <Lock className="w-5 h-5 text-amber-400" />
+                    )}
+                    <div>
+                      <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                        <span>{vaultConfig.title}</span>
+                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          +18 Consentido
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        {formatDiamondsDisplay(vaultConfig.priceDiamonds)} · Validade de {vaultConfig.durationDays} dias ·{' '}
+                        {vipVaultMediaList.length} mídias no cofre (independente de mídias avulsas)
+                      </p>
                     </div>
-                    <button
-                      onClick={handlePurchaseVipVault}
-                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs cursor-pointer shrink-0"
-                    >
-                      Desbloquear Cofre VIP ({formatDiamondsDisplay(vaultConfig.priceDiamonds)})
-                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setShowVipVaultPanel((prev) => !prev)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>{showVipVaultPanel ? 'Ocultar Detalhes' : 'Ver Cofre VIP'}</span>
+                  </button>
+                </div>
+
+                <div className="pt-3 border-t border-white/10 space-y-3">
+                  <p className="text-xs text-slate-300 leading-relaxed">{vaultConfig.description}</p>
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-200">
+                    <strong>Escopo e Condições:</strong> {vaultConfig.scopeDescription}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {vipVaultMediaList.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-xl overflow-hidden border border-white/10 bg-slate-950 flex flex-col"
+                      >
+                        <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
+                          <img
+                            src={item.safePreviewUrl}
+                            alt={item.caption}
+                            className={`w-full h-full object-cover transition-all ${
+                              item.isUnlockedForViewer ? '' : 'blur-lg scale-110 brightness-75'
+                            }`}
+                          />
+                          <div className="absolute top-2 left-2 flex items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded bg-black/80 text-amber-300 text-[10px] font-bold uppercase flex items-center gap-1">
+                              {item.mediaType === 'video' ? (
+                                <Video className="w-3 h-3" />
+                              ) : (
+                                <Camera className="w-3 h-3" />
+                              )}
+                              {item.mediaType === 'video' ? 'Vídeo Cofre VIP' : 'Foto Cofre VIP'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="p-3 space-y-1.5">
+                          <p className="text-xs font-semibold text-white">{item.caption}</p>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                            <span>Status: {item.isUnlockedForViewer ? 'Liberado' : 'Incluso no Cofre VIP'}</span>
+                            <span>+18 Verificado</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {!hasVipVaultAccess ? (
+                    <div className="p-3 rounded-xl bg-black/40 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-bold text-white">
+                          Acesso ao Cofre VIP: {formatDiamondsDisplay(vaultConfig.priceDiamonds)} · {vaultConfig.durationDays} dias
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Inclui todas as {vipVaultMediaList.length} mídias do Cofre VIP. Não inclui fotos/vídeos avulsos.
+                        </div>
+                      </div>
+                      <button
+                        onClick={requestVipVaultConfirmation}
+                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs cursor-pointer shrink-0"
+                      >
+                        Desbloquear Cofre VIP ({formatDiamondsDisplay(vaultConfig.priceDiamonds)})
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/30 text-xs text-emerald-300 flex items-center justify-between">
+                      <span>Você possui acesso vigente ao Cofre VIP de {profile.name} ({vaultConfig.durationDays} dias).</span>
+                      <span className="font-mono text-[10px] uppercase">URL Temporária Protegida</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ABA 4: DESBLOQUEADOS PELO VISITANTE */}
+            {activeMediaTab === 'UNLOCKED' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                      Seus Conteúdos Liberados neste Perfil
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Reúne os itens gratuitos e todas as mídias exclusivas ou do Cofre VIP que você já desbloqueou
+                    </p>
+                  </div>
+                </div>
+
+                {unlockedMediaList.length === 0 ? (
+                  <div className="p-6 rounded-2xl bg-[#11111c] border border-white/10 text-center text-xs text-slate-400">
+                    Você ainda não possui itens desbloqueados neste perfil.
                   </div>
                 ) : (
-                  <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/30 text-xs text-emerald-300 flex items-center justify-between">
-                    <span>Você possui acesso vigente ao Cofre VIP de {profile.name} ({vaultConfig.durationDays} dias).</span>
-                    <span className="font-mono text-[10px] uppercase">URL Temporária Protegida</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {unlockedMediaList.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl overflow-hidden bg-[#11111c] border border-indigo-500/30 flex flex-col justify-between"
+                      >
+                        <div className="relative aspect-[16/10] bg-slate-900">
+                          <img
+                            src={item.safePreviewUrl}
+                            alt={item.caption}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute top-2 left-2">
+                            <span className="px-2 py-0.5 rounded bg-black/80 text-emerald-300 text-[10px] font-bold uppercase flex items-center gap-1">
+                              <Unlock className="w-3 h-3" />
+                              {item.modality === 'FREE'
+                                ? 'Gratuito'
+                                : item.modality === 'VIP_VAULT'
+                                ? 'Cofre VIP Liberado'
+                                : 'Exclusivo Desbloqueado'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="p-3.5 space-y-2">
+                          <p className="text-xs font-semibold text-white">{item.caption}</p>
+                          <button
+                            type="button"
+                            onClick={() => handleViewFreeOrUnlockedMedia(item)}
+                            className="w-full py-2 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-200 font-bold text-xs cursor-pointer"
+                          >
+                            {activeSignedUrlByMediaId[item.id]
+                              ? 'URL Temporária Assinada Ativa'
+                              : 'Abrir Mídia Protegida'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             )}
           </div>
-
-          {/* ================================================================= */}
-          {/* SEÇÃO 2: FOTOS E VÍDEOS COM DESBLOQUEIO INDIVIDUAL                */}
-          {/* ================================================================= */}
-          {individualMediaList.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                    Fotos e Vídeos com Desbloqueio Individual
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Cada item avulso possui preço próprio em diamantes (independente do Cofre VIP)
-                  </p>
-                </div>
-                <span className="text-[10px] font-mono text-amber-300 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded">
-                  Foto {formatDiamondsDisplay(catalog.individualPhotoUnlockDiamonds)} · Vídeo{' '}
-                  {formatDiamondsDisplay(catalog.individualVideoUnlockDiamonds)}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {individualMediaList.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl overflow-hidden bg-[#11111c] border border-white/10 flex flex-col justify-between"
-                  >
-                    <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
-                      <img
-                        src={item.safePreviewUrl}
-                        alt={item.caption}
-                        className={`w-full h-full object-cover transition-all ${
-                          item.isUnlockedForViewer ? '' : 'blur-md scale-105 brightness-75'
-                        }`}
-                      />
-                      <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded bg-black/80 text-white text-[10px] font-bold uppercase flex items-center gap-1">
-                          {item.mediaType === 'video' ? (
-                            <Video className="w-3 h-3 text-rose-400" />
-                          ) : (
-                            <Camera className="w-3 h-3 text-amber-400" />
-                          )}
-                          {item.mediaType === 'video' ? 'Vídeo Exclusivo' : 'Foto Exclusiva'}
-                        </span>
-                      </div>
-                      <div className="absolute top-2.5 right-2.5">
-                        <span className="px-2 py-0.5 rounded bg-rose-600/90 text-white font-mono text-[11px] font-extrabold">
-                          {formatDiamondsDisplay(item.priceDiamonds)}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="p-3.5 space-y-2.5">
-                      <p className="text-xs font-semibold text-white leading-snug">{item.caption}</p>
-                      <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between">
-                        <span>Desbloqueio Único Individual</span>
-                        <span>Independente do Cofre VIP</span>
-                      </div>
-
-                      {item.isUnlockedForViewer ? (
-                        <div className="p-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center justify-between">
-                          <span className="font-semibold flex items-center gap-1">
-                            <Unlock className="w-3.5 h-3.5" />
-                            Desbloqueado
-                          </span>
-                          <span className="font-mono text-[10px] truncate max-w-[140px]">
-                            {activeSignedUrlByMediaId[item.id] ? 'Token Assinado Ativo' : 'Acesso Confirmado'}
-                          </span>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => handleUnlockIndividualMedia(item.id)}
-                          className="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                        >
-                          <Lock className="w-3.5 h-3.5" />
-                          <span>
-                            Desbloquear {item.mediaType === 'video' ? 'Vídeo' : 'Foto'} (
-                            {formatDiamondsDisplay(item.priceDiamonds)})
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* ================================================================= */}
           {/* SEÇÃO 3: PRESENTES VIRTUAIS EM DIAMANTES (29 💎 A 199 💎)         */}
@@ -783,6 +1169,14 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
             </span>
           </button>
         </div>
+        <CreatorContentStudioModal
+          isOpen={isCreatorStudioOpen}
+          onClose={() => setIsCreatorStudioOpen(false)}
+          creatorId={profile.id}
+          creatorName={profile.name}
+          initialTab={creatorStudioInitialTab}
+          onPublished={() => setRefreshTick((t) => t + 1)}
+        />
       </div>
     </div>
   );

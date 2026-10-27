@@ -28,7 +28,7 @@ import { matchAndMessagingService, PersistentMessage } from './matchAndMessaging
 
 export type ExclusiveMediaType = 'photo' | 'video';
 
-export type ExclusiveMonetizationModality = 'INDIVIDUAL_UNLOCK' | 'VIP_VAULT';
+export type ExclusiveMonetizationModality = 'FREE' | 'INDIVIDUAL_UNLOCK' | 'VIP_VAULT';
 
 export type ExclusiveMediaLifecycleState =
   | 'draft'
@@ -412,6 +412,7 @@ export interface CreatorMonetizationDashboardSummary {
   publishedIndividualPhotosCount: number;
   publishedIndividualVideosCount: number;
   publishedVipVaultItemsCount: number;
+  publishedFreeItemsCount?: number;
 }
 
 export interface PlatformMonetizationReconciliationReport {
@@ -1028,6 +1029,64 @@ class ExclusiveContentAndInterestService {
           },
           unlockCount: 22,
         },
+        {
+          id: 'excl_free_val_05',
+          creatorId: 'valentina',
+          creatorName: 'Valentina Rossi',
+          mediaType: 'photo',
+          modality: 'FREE',
+          caption: 'Conteúdo Gratuito: Café da Manhã em Milão &Look do Dia ✨',
+          publishedAt: now,
+          createdAt: now,
+          updatedAt: now,
+          priceDiamonds: 0,
+          priceCents: 0,
+          priceBrl: 0,
+          currency: 'BRL',
+          state: 'published',
+          classification: 'fashion_lingerie',
+          moderationResult: 'approved',
+          ageVerified18Plus: true,
+          consentDeclared: true,
+          ownershipDeclared: true,
+          safePreviewUrl: '/src/assets/images/profile_valentina_1791856836634.jpg',
+          privateMasterUrl: 'private://vault/valentina/free_milan_morning.jpg',
+          accessRules: {
+            requiresIndividualUnlock: false,
+            requiresVipVaultPass: false,
+            minimumAge: 18,
+          },
+          unlockCount: 42,
+        },
+        {
+          id: 'excl_free_isa_03',
+          creatorId: 'isabella',
+          creatorName: 'Isabella Fontes',
+          mediaType: 'photo',
+          modality: 'FREE',
+          caption: 'Conteúdo Gratuito: Pós-Praia no Leblon ☀️',
+          publishedAt: now,
+          createdAt: now,
+          updatedAt: now,
+          priceDiamonds: 0,
+          priceCents: 0,
+          priceBrl: 0,
+          currency: 'BRL',
+          state: 'published',
+          classification: 'sensual',
+          moderationResult: 'approved',
+          ageVerified18Plus: true,
+          consentDeclared: true,
+          ownershipDeclared: true,
+          safePreviewUrl: '/src/assets/images/profile_isabella_1791856837043.jpg',
+          privateMasterUrl: 'private://vault/isabella/free_leblon_sun.jpg',
+          accessRules: {
+            requiresIndividualUnlock: false,
+            requiresVipVaultPass: false,
+            minimumAge: 18,
+          },
+          unlockCount: 31,
+        },
       ];
       getStorage().setItem(STORAGE_KEY_EXCLUSIVE_MEDIA, JSON.stringify(initialMedia));
     }
@@ -1227,8 +1286,12 @@ class ExclusiveContentAndInterestService {
     if (params.mediaType !== 'photo' && params.mediaType !== 'video') {
       throw new Error('Tipo de mídia inválido. Use "photo" ou "video".');
     }
-    if (params.modality !== 'INDIVIDUAL_UNLOCK' && params.modality !== 'VIP_VAULT') {
-      throw new Error('Modalidade inválida. Use "INDIVIDUAL_UNLOCK" ou "VIP_VAULT".');
+    if (
+      params.modality !== 'FREE' &&
+      params.modality !== 'INDIVIDUAL_UNLOCK' &&
+      params.modality !== 'VIP_VAULT'
+    ) {
+      throw new Error('Modalidade inválida. Use "FREE", "INDIVIDUAL_UNLOCK" ou "VIP_VAULT".');
     }
 
     // Validação rigorosa de normas da plataforma (+18 e consentimento)
@@ -1270,6 +1333,15 @@ class ExclusiveContentAndInterestService {
             : catalog.individualPhotoUnlockDiamonds;
         resolvedCents = resolvedDiamonds * PAID_DIAMOND_REFERENCE_CENTS;
       }
+    } else if (params.modality === 'FREE') {
+      if (params.priceDiamonds !== undefined && params.priceDiamonds !== 0) {
+        throw new Error('Conteúdo gratuito deve possuir preço igual a 0 diamantes.');
+      }
+      if (params.priceCents !== undefined && params.priceCents !== 0) {
+        throw new Error('Conteúdo gratuito deve possuir preço igual a 0 centavos.');
+      }
+      resolvedDiamonds = 0;
+      resolvedCents = 0;
     } else {
       if (params.priceCents !== undefined && (!Number.isInteger(params.priceCents) || params.priceCents < 0)) {
         throw new Error('Preço inválido para mídia do Cofre VIP.');
@@ -1428,6 +1500,14 @@ class ExclusiveContentAndInterestService {
         unlockCount: item.unlockCount,
         isUnlockedForViewer: this.hasAuthorizedMediaAccess(viewerId, item.id),
       }));
+  }
+
+  public listCreatorOwnMedia(creatorId: string): PublicExclusiveMediaView[] {
+    return this.listPublicMediaForProfile({
+      creatorId,
+      viewerUserId: creatorId,
+      includeNonPublishedForCreatorOrAdmin: true,
+    });
   }
 
   public getMediaByIdInternal(mediaId: string): ExclusiveMediaItem | null {
@@ -1599,6 +1679,9 @@ class ExclusiveContentAndInterestService {
     if (media.state !== 'published' || media.moderationResult !== 'approved') return false;
     if (this.isPairBlocked(buyerUserId, media.creatorId)) return false;
 
+    if (media.modality === 'FREE') {
+      return Boolean(buyerUserId && buyerUserId.trim().length > 0);
+    }
     if (media.modality === 'INDIVIDUAL_UNLOCK') {
       return this.hasActiveIndividualMediaUnlock(buyerUserId, media.id);
     }
@@ -1670,6 +1753,9 @@ class ExclusiveContentAndInterestService {
       const media = this.getMediaByIdInternal(params.mediaId);
       if (!media) {
         throw new Error('Mídia exclusiva não encontrada.');
+      }
+      if (media.modality === 'FREE') {
+        throw new Error('Conteúdo gratuito já possui acesso liberado e não requer cobrança em diamantes.');
       }
       if (media.modality !== 'INDIVIDUAL_UNLOCK') {
         throw new Error('Esta mídia pertence ao Cofre VIP e não pode ser adquirida como item individual avulso.');
@@ -3783,6 +3869,7 @@ class ExclusiveContentAndInterestService {
         (m) => m.modality === 'INDIVIDUAL_UNLOCK' && m.mediaType === 'video'
       ).length,
       publishedVipVaultItemsCount: allMedia.filter((m) => m.modality === 'VIP_VAULT').length,
+      publishedFreeItemsCount: allMedia.filter((m) => m.modality === 'FREE').length,
     };
   }
 

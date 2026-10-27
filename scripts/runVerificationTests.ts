@@ -406,6 +406,42 @@ async function main() {
     }
   }
 
+  console.log('\n========================================================================');
+  console.log('JOBS — 8 TESTES OBRIGATÓRIOS: GOOGLE MAPS, GRADE 1–2 KM & PRIVACIDADE ESPACIAL');
+  console.log('========================================================================\n');
+
+  const { runProximityPrivacyTestSuite } = await import(
+    '../src/services/__tests__/proximityPrivacyService.test'
+  );
+  const proximitySummary = await runProximityPrivacyTestSuite();
+
+  for (const t of proximitySummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — 8 TESTES OBRIGATÓRIOS: PUBLICAÇÃO NO PERFIL, COFRE VIP & DESBLOQUEIO INDIVIDUAL');
+  console.log('========================================================================\n');
+
+  const { runCreatorContentAndVipVaultTestSuite } = await import(
+    '../src/services/__tests__/creatorContentAndVipVault.test'
+  );
+  const creatorContentSummary = await runCreatorContentAndVipVaultTestSuite();
+
+  for (const t of creatorContentSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
   const grandTotal =
     summary.totalTests +
     withdrawalSummary.total +
@@ -428,7 +464,9 @@ async function main() {
     revReportSummary.total +
     exclMonetizationSummary.total +
     revSimSummary.total +
-    sha256AuditSummary.total;
+    sha256AuditSummary.total +
+    proximitySummary.total +
+    creatorContentSummary.total;
   const grandPassed =
     summary.passedCount +
     withdrawalSummary.passed +
@@ -451,7 +489,9 @@ async function main() {
     revReportSummary.passed +
     exclMonetizationSummary.passed +
     revSimSummary.passed +
-    sha256AuditSummary.passed;
+    sha256AuditSummary.passed +
+    proximitySummary.passed +
+    creatorContentSummary.passed;
   const grandFailed =
     summary.failedCount +
     withdrawalSummary.failed +
@@ -474,7 +514,9 @@ async function main() {
     revReportSummary.failed +
     exclMonetizationSummary.failed +
     revSimSummary.failed +
-    sha256AuditSummary.failed;
+    sha256AuditSummary.failed +
+    proximitySummary.failed +
+    creatorContentSummary.failed;
 
   console.log('\n========================================================================');
   console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
@@ -493,7 +535,9 @@ async function main() {
       revReportSummary.durationMs +
       exclMonetizationSummary.durationMs +
       revSimSummary.durationMs +
-      sha256AuditSummary.durationMs
+      sha256AuditSummary.durationMs +
+      proximitySummary.durationMs +
+      creatorContentSummary.durationMs
     }ms`
   );
   console.log('========================================================================\n');

@@ -22,6 +22,7 @@ interface Screen16SettingsProps {
   onNavigateToPasswordReset: () => void;
   onLogout: () => void;
   onOpenGlobalVision?: () => void;
+  onOpenCreatorContentStudio?: () => void;
 }
 
 export const Screen16Settings: React.FC<Screen16SettingsProps> = ({
@@ -31,6 +32,7 @@ export const Screen16Settings: React.FC<Screen16SettingsProps> = ({
   onNavigateToPasswordReset,
   onLogout,
   onOpenGlobalVision,
+  onOpenCreatorContentStudio,
 }) => {
   const [language, setLanguage] = useState<'pt' | 'en' | 'es'>('pt');
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -81,6 +83,26 @@ export const Screen16Settings: React.FC<Screen16SettingsProps> = ({
             </div>
             <ChevronRight className="w-4 h-4 text-slate-500" />
           </button>
+
+          {onOpenCreatorContentStudio && (
+            <button
+              onClick={onOpenCreatorContentStudio}
+              className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-[#1a1224] to-[#141422] hover:border-rose-500/50 border border-rose-500/30 flex items-center justify-between text-left transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <div>
+                  <div className="font-bold text-white">
+                    Meu Conteúdo, Publicar Foto/Vídeo & Cofre VIP
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Gerenciar conteúdos gratuitos, exclusivos (49/99 💎) e Cofre VIP (149 💎)
+                  </div>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-amber-400" />
+            </button>
+          )}
         </div>
       </div>
 

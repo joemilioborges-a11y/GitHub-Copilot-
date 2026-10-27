@@ -124,6 +124,11 @@ export interface Profile {
   hideAge?: boolean;
   hideCity?: boolean;
   hideSexualOrientation?: boolean;
+  approximateZoneId?: string;
+  approximateZoneCentroid?: {
+    lat: number;
+    lng: number;
+  };
 }
 
 export interface UserProfileData {
@@ -451,6 +456,8 @@ export interface UserPrivacySettings {
   allowAiAnalysis: boolean;
   essentialCookiesOnly: boolean;
   dataSharingThirdParty: boolean;
+  enableProximityDiscovery?: boolean;
+  proximityRadiusKm?: number;
 }
 
 export type ScreenId =

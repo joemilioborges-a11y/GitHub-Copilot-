@@ -13,10 +13,13 @@ import {
   MessageCircle,
   Filter,
   RotateCcw,
+  Compass,
+  Layers,
 } from 'lucide-react';
 import { Profile, UserProfileData } from '../../types';
 import { calculateAiCompatibility } from '../../utils/aiMatchmaking';
 import { DiscoveryLiveFilterPanel } from '../DiscoveryLiveFilterPanel';
+import { ProximityDiscoveryMapPanel } from '../ProximityDiscoveryMapPanel';
 import {
   DiscoveryAndLiveFilterCriteria,
   filterDiscoverProfiles,
@@ -25,6 +28,11 @@ import {
   resetSavedDiscoverFilters,
   subscribeDiscoverFilters,
 } from '../../utils/discoveryAndLiveFilters';
+import {
+  ProximityConsentAndState,
+  filterProfilesWithProximityAndPrivacy,
+  getProximityConsentState,
+} from '../../utils/proximityPrivacyService';
 import {
   exclusiveContentAndInterestService,
   formatDiamondsDisplay,
@@ -63,6 +71,11 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
     [walletRefresh]
   );
 
+  const [discoverSubView, setDiscoverSubView] = useState<'cards' | 'map_zones'>('cards');
+  const [proximityState, setProximityState] = useState<ProximityConsentAndState>(() =>
+    getProximityConsentState()
+  );
+
   // Estado dos filtros preservado durante a navegação
   const [filterCriteria, setFilterCriteria] = useState<DiscoveryAndLiveFilterCriteria>(() =>
     getSavedDiscoverFilters()
@@ -79,10 +92,22 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
     [profiles, filterCriteria]
   );
 
+  const proximityResult = useMemo(
+    () => filterProfilesWithProximityAndPrivacy(profiles, filterCriteria, proximityState),
+    [profiles, filterCriteria, proximityState]
+  );
+
   const displayedProfiles = filterResult.filteredProfiles;
   const safeIndex =
     displayedProfiles.length > 0 ? Math.min(currentIndex, displayedProfiles.length - 1) : 0;
   const currentProfile = displayedProfiles[safeIndex] || null;
+  const currentEnrichedProfile = useMemo(
+    () =>
+      currentProfile
+        ? proximityResult.enrichedProfiles.find((e) => e.profile.id === currentProfile.id) || null
+        : null,
+    [currentProfile, proximityResult.enrichedProfiles]
+  );
 
   const handleApplyFilters = (nextCriteria: DiscoveryAndLiveFilterCriteria) => {
     setSavedDiscoverFilters(nextCriteria);
@@ -271,8 +296,49 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
         onClearFilters={handleClearFilters}
       />
 
-      {/* Main Profile Card */}
-      <div className="relative aspect-[3/4] sm:aspect-[4/5] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-950 group select-none">
+      {/* Sub-Abas de Descoberta: Cartões vs Mapa de Zonas Aproximadas (Google Maps 1-2 km) */}
+      <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-[#10101c] border border-white/10 mb-2.5">
+        <button
+          type="button"
+          onClick={() => setDiscoverSubView('cards')}
+          data-testid="discover-subtab-cards"
+          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+            discoverSubView === 'cards'
+              ? 'bg-gradient-to-r from-rose-600 to-amber-500 text-white shadow'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Cartões ({displayedProfiles.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setDiscoverSubView('map_zones')}
+          data-testid="discover-subtab-map-zones"
+          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+            discoverSubView === 'map_zones'
+              ? 'bg-gradient-to-r from-rose-600 to-amber-500 text-white shadow'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Compass className="w-3.5 h-3.5" />
+          <span>Mapa de Zonas (~1–2 km)</span>
+        </button>
+      </div>
+
+      {discoverSubView === 'map_zones' ? (
+        <ProximityDiscoveryMapPanel
+          proximityState={proximityState}
+          onProximityStateChange={setProximityState}
+          zoneSummaries={proximityResult.zoneSummaries}
+          enrichedProfiles={proximityResult.enrichedProfiles}
+          referenceCentroid={proximityResult.referenceCentroid}
+          referenceLabel={proximityResult.referenceLabel}
+          onSelectProfile={onViewProfile}
+        />
+      ) : (
+        /* Main Profile Card */
+        <div className="relative aspect-[3/4] sm:aspect-[4/5] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-950 group select-none">
         {/* Photo Display */}
         <img
           src={photoUrl}
@@ -341,9 +407,20 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-slate-300">
+          <div className="flex items-center gap-1.5 text-xs text-slate-300 flex-wrap">
             <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-            <span>{currentProfile.city}</span>
+            <span>
+              {currentProfile.hideCity ? 'Região oculta por privacidade' : currentProfile.city}
+            </span>
+            {!currentProfile.hideCity && (
+              <>
+                <span className="text-slate-500">•</span>
+                <span className="px-1.5 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[10px] font-bold">
+                  {currentEnrichedProfile?.approximateDistanceLabel ||
+                    `~${Math.max(1, Math.round(currentProfile.distanceKm))} km`}
+                </span>
+              </>
+            )}
             <span className="text-slate-500">•</span>
             <span>{currentProfile.occupation}</span>
           </div>
@@ -406,6 +483,7 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       {/* Modal for "Enviar Interesse" with quick message */}
       {interestModalOpen && (

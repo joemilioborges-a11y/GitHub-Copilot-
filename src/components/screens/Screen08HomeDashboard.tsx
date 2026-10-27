@@ -28,6 +28,7 @@ interface Screen08HomeDashboardProps {
   onSelectProfile: (profile: Profile) => void;
   onOpenChallenges?: () => void;
   onOpenWallet?: () => void;
+  onOpenCreatorContentStudio?: () => void;
 }
 
 export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
@@ -40,6 +41,7 @@ export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
   onSelectProfile,
   onOpenChallenges,
   onOpenWallet,
+  onOpenCreatorContentStudio,
 }) => {
   // Take top 4 compatible profiles
   const recommendedProfiles = profiles.slice(0, 4).map((p) => {
@@ -175,6 +177,33 @@ export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
+          </div>
+        )}
+
+        {onOpenCreatorContentStudio && (
+          <div
+            onClick={onOpenCreatorContentStudio}
+            className="sm:col-span-2 p-4 rounded-2xl bg-gradient-to-r from-[#1c1122] via-[#151226] to-[#1d1512] border border-rose-500/35 hover:border-rose-500/60 transition-all cursor-pointer flex items-center justify-between group shadow-lg"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-300 flex items-center justify-center border border-rose-500/40 group-hover:scale-105 transition-transform">
+                <Video className="w-5 h-5 text-rose-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-sm font-bold text-white">
+                    Meu Conteúdo, Publicar Foto/Vídeo & Cofre VIP
+                  </h3>
+                  <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    49 💎 / 99 💎 / 149 💎
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Publique fotos e vídeos gratuitos, exclusivos avulsos ou no seu Cofre VIP com repasse 70%
+                </p>
+              </div>
+            </div>
+            <ArrowRight className="w-4 h-4 text-rose-400 group-hover:translate-x-1 transition-transform" />
           </div>
         )}
       </div>

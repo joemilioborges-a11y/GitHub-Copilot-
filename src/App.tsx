@@ -26,6 +26,7 @@ import { MatchCelebrationModal } from './components/MatchCelebrationModal';
 import { ReferralPyramidModal } from './components/ReferralPyramidModal';
 import { GlobalVisionModal } from './components/GlobalVisionModal';
 import { InteractiveChallengesModal } from './components/InteractiveChallengesModal';
+import { CreatorContentStudioModal } from './components/CreatorContentStudioModal';
 
 // 18 Screens Imports
 import { Screen01Landing } from './components/screens/Screen01Landing';
@@ -235,6 +236,7 @@ export default function App() {
   const [isAdminDashboardOpen, setIsAdminDashboardOpen] = useState(false);
   const [isReferralModalOpen, setIsReferralModalOpen] = useState(false);
   const [isChallengesModalOpen, setIsChallengesModalOpen] = useState(false);
+  const [isCreatorContentStudioOpen, setIsCreatorContentStudioOpen] = useState(false);
 
   useEffect(() => {
     initGoogleAnalytics();
@@ -536,6 +538,7 @@ export default function App() {
         {activeScreen === '06_profile_creation' && (
           <Screen06ProfileCreation
             initialData={userProfile}
+            onOpenCreatorContentStudio={() => setIsCreatorContentStudioOpen(true)}
             onSuccess={(updated) => {
               setUserProfile((prev) => {
                 const next = { ...prev, ...updated };
@@ -594,6 +597,7 @@ export default function App() {
             }}
             onOpenChallenges={() => setIsChallengesModalOpen(true)}
             onOpenWallet={() => setIsWalletOpen(true)}
+            onOpenCreatorContentStudio={() => setIsCreatorContentStudioOpen(true)}
           />
         )}
 
@@ -725,6 +729,7 @@ export default function App() {
             onNavigateToReports={() => setActiveScreen('18_reports_blocks')}
             onNavigateToPasswordReset={() => setActiveScreen('05_password_recovery')}
             onOpenGlobalVision={() => setIsGlobalVisionOpen(true)}
+            onOpenCreatorContentStudio={() => setIsCreatorContentStudioOpen(true)}
             onLogout={() => {
               authService.logout();
               localStorage.removeItem('jobs_auth_user');
@@ -892,6 +897,14 @@ export default function App() {
         isOpen={isChallengesModalOpen}
         onClose={() => setIsChallengesModalOpen(false)}
         userId={currentUserId}
+      />
+
+      {/* Estúdio de Publicação de Fotos/Vídeos, Meu Conteúdo e Cofre VIP */}
+      <CreatorContentStudioModal
+        isOpen={isCreatorContentStudioOpen}
+        onClose={() => setIsCreatorContentStudioOpen(false)}
+        creatorId="valentina"
+        creatorName={userProfile.name || 'Valentina Rossi'}
       />
     </div>
   );
