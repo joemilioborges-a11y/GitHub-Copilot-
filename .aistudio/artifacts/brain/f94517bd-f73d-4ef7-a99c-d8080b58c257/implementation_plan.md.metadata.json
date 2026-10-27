@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano incremental de auditoria, endurecimento contábil (ledgerService), correção de regras do Firestore, isolamento estrito entre Simulação (localStorage) e Produção (Firestore) e checklist de prontidão do JOBS.",
-  "updatedAt":  "2026-10-27T17:32:04.055446287Z",
+  "summary":  "Plano de implementacao incremental para protecao de fotos e videos dos usuarios no JOBS (Fases 1 a 5): controle de acesso com URLs temporarias assinadas e revogacao imediata, FLAG_SECURE dinamico por tela no Android, visualizador protegido com renderizacao em Canvas para fotos, player de video endurecido e marca-dagua forense dinamica, preservando 100% do ledgerService e adicionando suite completa de testes automatizados.",
+  "updatedAt":  "2026-10-27T19:10:40.781904126Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
