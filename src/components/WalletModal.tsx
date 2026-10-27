@@ -31,6 +31,10 @@ import {
   CreditPackageConfig,
   LedgerEntry,
 } from '../services/ledgerService';
+import {
+  exclusiveContentAndInterestService,
+  UserDiamondWalletState,
+} from '../services/exclusiveContentAndInterestService';
 import { monetizationService } from '../services/monetizationService';
 import { runLedgerVerificationSuite, TestResult } from '../services/__tests__/ledgerService.test';
 import { trackEvent, incrementDailyTrafficMetric } from '../utils/analytics';
@@ -52,9 +56,12 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 }) => {
   const [mainTab, setMainTab] = useState<'buy' | 'ledger' | 'unlocked' | 'tests' | 'creator_info'>(initialTab);
 
-  // Fonte da verdade: saldo do livro-razão contábil
+  // Fonte da verdade: saldo do livro-razão contábil e carteira segregada de diamantes
   const [userBalance, setUserBalance] = useState<number>(() =>
     financialLedger.getUserCredits('current_user')
+  );
+  const [segregatedWallet, setSegregatedWallet] = useState<UserDiamondWalletState>(() =>
+    exclusiveContentAndInterestService.getUserDiamondWallet('current_user')
   );
 
   // Pacote selecionado
@@ -89,6 +96,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const refreshLedger = () => {
     const bal = financialLedger.getUserCredits('current_user');
     setUserBalance(bal);
+    setSegregatedWallet(exclusiveContentAndInterestService.getUserDiamondWallet('current_user'));
     setLedgerEntries(financialLedger.getEntries());
     if (onCreditsUpdated) {
       onCreditsUpdated(bal);
@@ -133,6 +141,14 @@ export const WalletModal: React.FC<WalletModalProps> = ({
         simulateFailure,
       });
 
+      if (!res.isReplay && !simulatePending && res.success) {
+        exclusiveContentAndInterestService.creditUserDiamonds({
+          userId: 'current_user',
+          purchasedDiamondsToAdd: selectedPkg.credits,
+          bonusDiamondsToAdd: selectedPkg.bonusCredits,
+        });
+      }
+
       refreshLedger();
 
       if (res.isReplay) {
@@ -151,7 +167,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       } else {
         setFeedbackMessage({
           type: 'success',
-          text: `+${selectedPkg.totalCredits} créditos adicionados à sua carteira!`,
+          text: `+${selectedPkg.totalCredits} 💎 adicionados (${selectedPkg.credits} comprados + ${selectedPkg.bonusCredits} bônus)!`,
           details: `Lançamento contábil registrado no Livro-Razão (#${res.entries[1]?.id}) via ${paymentMethod.toUpperCase()} (Sandbox).`,
         });
 
@@ -212,10 +228,11 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     }
   };
 
-  // Filtragem de entradas
-  const filteredEntries = ledgerEntries.filter((entry) => {
+  // Filtragem de entradas do consumidor (exibe movimentações em 💎 sem expor pernas internas fiduciárias nos comprovantes do cliente)
+  const customerCreditEntries = ledgerEntries.filter((e) => e.currency === 'CREDITS');
+  const filteredEntries = customerCreditEntries.filter((entry) => {
     if (ledgerFilter === 'purchases') return entry.operationType === 'CREDIT_PURCHASE';
-    if (ledgerFilter === 'unlocks') return entry.operationType === 'CONTENT_UNLOCK';
+    if (ledgerFilter === 'unlocks') return entry.operationType === 'CONTENT_UNLOCK' || entry.operationType === 'TIP_GIFT';
     if (ledgerFilter === 'refunds') return entry.operationType === 'REFUND';
     return true;
   });
@@ -224,31 +241,38 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
       <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Top Header */}
-        <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-slate-900 via-rose-950/20 to-slate-900">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-slate-900 via-rose-950/20 to-slate-900">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-rose-950/40">
               <Coins className="w-5 h-5 text-white" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-white tracking-tight">Carteira de Créditos JOBS</h2>
+                <h2 className="text-xl font-bold text-white tracking-tight">Carteira — Comprar Créditos (💎)</h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40">
                   SANDBOX AUDITADO
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Moeda interna da plataforma para interações, mídias e transmissões ao vivo
+                Moeda interna da plataforma para serviços, Cofre VIP, mídias e transmissões ao vivo
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            {/* Live Balance Projection */}
-            <div className="bg-slate-800/90 border border-slate-700 px-4 py-2 rounded-xl flex items-center gap-2.5">
-              <span className="text-xs text-slate-400 font-medium">Saldo Atual:</span>
-              <span className="text-lg font-extrabold text-amber-400 flex items-center gap-1">
-                💎 {userBalance.toLocaleString('pt-BR')}
-              </span>
+          <div className="flex items-center gap-3">
+            {/* Live Segregated Balance Projection */}
+            <div className="bg-slate-800/90 border border-slate-700 px-3.5 py-2 rounded-xl flex flex-col items-end">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium">Saldo Disponível:</span>
+                <span className="text-lg font-extrabold text-amber-400 flex items-center gap-1">
+                  💎 {userBalance.toLocaleString('pt-BR')}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono">
+                Comprados: <strong className="text-white">{segregatedWallet.purchasedDiamonds} 💎</strong> · Bônus:{' '}
+                <strong className="text-emerald-400">{segregatedWallet.bonusDiamonds} 💎</strong> · Consumidos:{' '}
+                <strong className="text-rose-300">{segregatedWallet.consumedTotalDiamonds} 💎</strong>
+              </div>
             </div>
 
             <button
@@ -338,7 +362,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             }`}
           >
             <Building2 className="w-4 h-4" />
-            Economia dos Criadores (70/30)
+            Economia Contábil (70/20/10)
           </button>
         </div>
 
@@ -743,12 +767,8 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                       </div>
 
                       <div className="text-right shrink-0">
-                        <p
-                          className={`text-sm font-extrabold ${
-                            entry.currency === 'CREDITS' ? 'text-amber-400' : 'text-emerald-400'
-                          }`}
-                        >
-                          {entry.currency === 'CREDITS' ? `💎 ${entry.amount}` : `R$ ${entry.amount.toFixed(2)}`}
+                        <p className="text-sm font-extrabold text-amber-400">
+                          {`${entry.amount} 💎`}
                         </p>
 
                         <span
@@ -933,10 +953,10 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                 </div>
 
                 <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-700/60 space-y-1">
-                  <span className="text-emerald-400 font-bold block text-sm">Ganhos de Criador (R$ BRL)</span>
+                  <span className="text-emerald-400 font-bold block text-sm">Regra Contábil 70 / 20 / 10 (Base Elegível)</span>
                   <p className="text-[11px] text-slate-400">
-                    • Repasse configurável de <strong>70% do valor econômico</strong>.<br />
-                    • Saldo segregado no Painel do Criador.<br />
+                    • <strong>70% Criador</strong> · <strong>20% JOBS</strong> · <strong>10% Reserva Operacional</strong>.<br />
+                    • Calculada sobre diamantes pagos consumidos (1 💎 pago = R$ 0,10); bônus têm valor fiduciário zero.<br />
                     • Saques condicionados a KYC 18+ e validação fiscal.
                   </p>
                 </div>

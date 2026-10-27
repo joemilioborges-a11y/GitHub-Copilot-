@@ -25,6 +25,11 @@ import {
   resetSavedDiscoverFilters,
   subscribeDiscoverFilters,
 } from '../../utils/discoveryAndLiveFilters';
+import {
+  exclusiveContentAndInterestService,
+  formatDiamondsDisplay,
+} from '../../services/exclusiveContentAndInterestService';
+import { authService } from '../../utils/authService';
 
 interface Screen09DiscoverProps {
   profiles: Profile[];
@@ -45,10 +50,18 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
   onSendInterest,
   onOpenPreferences,
 }) => {
+  const currentUserId = authService.getCurrentSession()?.userId || 'user_emilio_vip';
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [interestModalOpen, setInterestModalOpen] = useState(false);
   const [interestMessage, setInterestMessage] = useState('');
+  const [boostReceiptBanner, setBoostReceiptBanner] = useState<string | null>(null);
+  const [walletRefresh, setWalletRefresh] = useState(0);
+
+  const catalog = useMemo(
+    () => exclusiveContentAndInterestService.getDiamondServiceCatalog(),
+    [walletRefresh]
+  );
 
   // Estado dos filtros preservado durante a navegação
   const [filterCriteria, setFilterCriteria] = useState<DiscoveryAndLiveFilterCriteria>(() =>
@@ -107,7 +120,22 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
     onSendInterest(currentProfile, interestMessage);
     setInterestModalOpen(false);
     setInterestMessage('');
+    setWalletRefresh((t) => t + 1);
     handleNextCard();
+  };
+
+  const handleActivateProfileBoost = async () => {
+    try {
+      const res = await exclusiveContentAndInterestService.purchaseProfileBoost({
+        buyerUserId: currentUserId,
+        idempotencyKey: `idemp_boost_${currentUserId}_${Date.now()}`,
+        environment: 'sandbox',
+      });
+      setWalletRefresh((t) => t + 1);
+      setBoostReceiptBanner(res.customerReceipt.summaryText);
+    } catch (err: any) {
+      setBoostReceiptBanner(err?.message || 'Saldo de diamantes insuficiente para impulsionar perfil.');
+    }
   };
 
   if (!currentProfile) {
@@ -188,7 +216,7 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
   return (
     <div className="max-w-md mx-auto px-4 py-2">
       {/* Top Filter Bar */}
-      <div className="flex items-center justify-between mb-2 px-1">
+      <div className="flex items-center justify-between mb-2 px-1 gap-2">
         <div className="flex items-center gap-1.5 text-xs text-slate-300">
           <Flame className="w-4 h-4 text-rose-500 fill-current" />
           <span className="font-bold text-white">Descoberta JOBS</span>
@@ -196,14 +224,40 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
             ({safeIndex + 1} de {displayedProfiles.length})
           </span>
         </div>
-        <button
-          onClick={onOpenPreferences}
-          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
-          title="Filtros e Preferências"
-        >
-          <Filter className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleActivateProfileBoost}
+            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+            title={`Impulsionar perfil por ${catalog.profileBoostDurationHours} horas`}
+          >
+            <Zap className="w-3.5 h-3.5 fill-current" />
+            <span>
+              Impulsionar ({formatDiamondsDisplay(catalog.profileBoostDiamonds)} · {catalog.profileBoostDurationHours}h)
+            </span>
+          </button>
+          <button
+            onClick={onOpenPreferences}
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            title="Filtros e Preferências"
+          >
+            <Filter className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {boostReceiptBanner && (
+        <div className="mb-2 p-2.5 rounded-xl bg-amber-950/70 border border-amber-500/40 text-[11px] text-amber-200 flex items-center justify-between gap-2">
+          <span>{boostReceiptBanner}</span>
+          <button
+            type="button"
+            onClick={() => setBoostReceiptBanner(null)}
+            className="text-amber-300 hover:text-white font-bold"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Painel Complementar de Filtros (Sexo, Orientação Sexual, Idade e Localização) */}
       <DiscoveryLiveFilterPanel
@@ -337,7 +391,7 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
           <button
             onClick={() => setInterestModalOpen(true)}
             className="w-11 h-11 rounded-full bg-amber-500/20 border border-amber-500/50 text-amber-300 hover:bg-amber-500/30 flex items-center justify-center shadow-lg transition-transform active:scale-90 cursor-pointer"
-            title="Enviar interesse com mensagem"
+            title={`Enviar interesse imediato (${formatDiamondsDisplay(catalog.immediateInterestDiamonds)})`}
           >
             <Zap className="w-5 h-5 fill-current" />
           </button>
@@ -372,8 +426,13 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
               </button>
             </div>
 
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-center justify-between font-mono">
+              <span>Custo por envio:</span>
+              <strong>{formatDiamondsDisplay(catalog.immediateInterestDiamonds)}</strong>
+            </div>
+
             <p className="text-xs text-slate-300">
-              Destaque seu interesse enviando uma primeira mensagem antes mesmo do match!
+              Destaque seu interesse enviando uma primeira mensagem e liberando a conversa direta antes mesmo do match!
             </p>
 
             {/* AI Suggested Icebreaker */}
@@ -402,7 +461,7 @@ export const Screen09Discover: React.FC<Screen09DiscoverProps> = ({
               className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white font-display font-bold text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer"
             >
               <Zap className="w-4 h-4 fill-current" />
-              <span>Enviar Interesse Imediato</span>
+              <span>Enviar Interesse Imediato ({formatDiamondsDisplay(catalog.immediateInterestDiamonds)})</span>
             </button>
           </div>
         </div>

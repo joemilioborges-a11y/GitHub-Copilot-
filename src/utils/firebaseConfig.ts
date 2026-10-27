@@ -6,10 +6,9 @@ import {
   setLogLevel,
   Firestore,
 } from 'firebase/firestore';
-import rawAppletConfig from '../../firebase-applet-config.json';
 
 /**
- * Estrutura exata das propriedades reais presentes em firebase-applet-config.json.
+ * Estrutura exata das propriedades de configuração do Firebase para o applet JOBS.
  */
 export interface FirebaseAppletConfig {
   projectId: string;
@@ -26,6 +25,19 @@ export interface FirebaseAppletConfig {
 
 export type FirebaseAppletCredentials = FirebaseAppletConfig;
 
+const DEFAULT_FIREBASE_APPLET_CONFIG: FirebaseAppletConfig = {
+  projectId: 'gen-lang-client-0491658347',
+  appId: '1:718871980484:web:f94517bd-f73d-4ef7-a99c-d8080b58c257',
+  apiKey: 'AIzaSyD-placeholder-key-for-applet-init',
+  authDomain: 'gen-lang-client-0491658347.firebaseapp.com',
+  firestoreDatabaseId: 'ai-studio-jhobs-f94517bd-f73d-4ef7-a99c-d8080b58c257',
+  storageBucket: 'gen-lang-client-0491658347.firebasestorage.app',
+  messagingSenderId: '718871980484',
+  measurementId: '',
+  oAuthClientId: '718871980484-dev.apps.googleusercontent.com',
+  recaptchaSiteKey: '',
+};
+
 const env: Record<string, string | undefined> =
   typeof import.meta !== 'undefined' && import.meta.env
     ? (import.meta.env as Record<string, string | undefined>)
@@ -36,24 +48,39 @@ function resolveConfigValue(envValue: string | undefined, fallbackValue: string)
 }
 
 export const firebaseConfig: Readonly<FirebaseAppletConfig> = Object.freeze({
-  projectId: resolveConfigValue(env.VITE_FIREBASE_PROJECT_ID, rawAppletConfig.projectId),
-  appId: resolveConfigValue(env.VITE_FIREBASE_APP_ID, rawAppletConfig.appId),
-  apiKey: resolveConfigValue(env.VITE_FIREBASE_API_KEY, rawAppletConfig.apiKey),
-  authDomain: resolveConfigValue(env.VITE_FIREBASE_AUTH_DOMAIN, rawAppletConfig.authDomain),
+  projectId: resolveConfigValue(
+    env.VITE_FIREBASE_PROJECT_ID,
+    DEFAULT_FIREBASE_APPLET_CONFIG.projectId
+  ),
+  appId: resolveConfigValue(env.VITE_FIREBASE_APP_ID, DEFAULT_FIREBASE_APPLET_CONFIG.appId),
+  apiKey: resolveConfigValue(env.VITE_FIREBASE_API_KEY, DEFAULT_FIREBASE_APPLET_CONFIG.apiKey),
+  authDomain: resolveConfigValue(
+    env.VITE_FIREBASE_AUTH_DOMAIN,
+    DEFAULT_FIREBASE_APPLET_CONFIG.authDomain
+  ),
   firestoreDatabaseId: resolveConfigValue(
     env.VITE_FIREBASE_FIRESTORE_DATABASE_ID,
-    rawAppletConfig.firestoreDatabaseId
+    DEFAULT_FIREBASE_APPLET_CONFIG.firestoreDatabaseId
   ),
-  storageBucket: resolveConfigValue(env.VITE_FIREBASE_STORAGE_BUCKET, rawAppletConfig.storageBucket),
+  storageBucket: resolveConfigValue(
+    env.VITE_FIREBASE_STORAGE_BUCKET,
+    DEFAULT_FIREBASE_APPLET_CONFIG.storageBucket
+  ),
   messagingSenderId: resolveConfigValue(
     env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    rawAppletConfig.messagingSenderId
+    DEFAULT_FIREBASE_APPLET_CONFIG.messagingSenderId
   ),
-  measurementId: resolveConfigValue(env.VITE_FIREBASE_MEASUREMENT_ID, rawAppletConfig.measurementId),
-  oAuthClientId: resolveConfigValue(env.VITE_FIREBASE_OAUTH_CLIENT_ID, rawAppletConfig.oAuthClientId),
+  measurementId: resolveConfigValue(
+    env.VITE_FIREBASE_MEASUREMENT_ID,
+    DEFAULT_FIREBASE_APPLET_CONFIG.measurementId
+  ),
+  oAuthClientId: resolveConfigValue(
+    env.VITE_FIREBASE_OAUTH_CLIENT_ID,
+    DEFAULT_FIREBASE_APPLET_CONFIG.oAuthClientId
+  ),
   recaptchaSiteKey: resolveConfigValue(
     env.VITE_FIREBASE_RECAPTCHA_SITE_KEY,
-    rawAppletConfig.recaptchaSiteKey
+    DEFAULT_FIREBASE_APPLET_CONFIG.recaptchaSiteKey
   ),
 });
 

@@ -859,7 +859,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
                     }}
                     className="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 text-[11px] font-bold border border-rose-500/30 transition-colors cursor-pointer"
                   >
-                    🌹 10
+                    🌹 29 💎
                   </button>
                   <button
                     onClick={() => {
@@ -868,7 +868,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
                     }}
                     className="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-bold border border-amber-500/30 transition-colors cursor-pointer"
                   >
-                    🍸 25
+                    🍸 49 💎
                   </button>
                   <button
                     onClick={() => {
@@ -877,7 +877,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
                     }}
                     className="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-[11px] font-bold border border-amber-500/30 transition-colors cursor-pointer"
                   >
-                    🍾 50
+                    🍾 79 💎
                   </button>
                   <button
                     onClick={() => {
@@ -886,7 +886,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
                     }}
                     className="py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-rose-600 text-slate-950 text-[11px] font-black transition-colors cursor-pointer"
                   >
-                    🔥 100
+                    🔥 119 💎
                   </button>
                 </div>
               </div>
@@ -920,7 +920,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Gift className="w-5 h-5 text-amber-400" />
-                <h4 className="text-sm font-bold text-white">Catálogo de Presentes Virtuais</h4>
+                <h4 className="text-sm font-bold text-white">Catálogo de Presentes Virtuais (29 💎 a 199 💎)</h4>
               </div>
               <button onClick={() => setIsGiftModalOpen(false)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
@@ -931,7 +931,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
             {activeSession.format === 'battle' && activeSession.battleState && (
               <div className="p-3 rounded-2xl bg-black/60 border border-amber-500/30 space-y-2">
                 <span className="text-[11px] font-bold text-amber-300 block">
-                  Escolha para quem vai o apoio na Batalha (+10 pts por crédito):
+                  Escolha para quem vai o apoio na Batalha (+10 pts por 💎):
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -987,13 +987,13 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
             {/* Balance check & Send button */}
             <div className="pt-2 border-t border-slate-800 space-y-3">
               <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Custo: <strong className="text-white font-mono">{selectedGift.creditsCost} créditos</strong></span>
-                <span>Seu Saldo: <strong className="text-amber-400 font-mono">{userCredits} créditos</strong></span>
+                <span>Custo: <strong className="text-white font-mono">{selectedGift.creditsCost} 💎</strong></span>
+                <span>Seu Saldo: <strong className="text-amber-400 font-mono">{userCredits} 💎</strong></span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-black/40 border border-white/5 text-[11px] text-slate-400 flex items-center justify-between">
-                <span>Repasse Contábil: <strong>70% Criador (R$ {(selectedGift.creditsCost * 0.1 * 0.7).toFixed(2)})</strong></span>
-                <span className="text-blue-400 font-bold">30% JOBS</span>
+                <span>Presente auditado em Diamantes (<strong>{selectedGift.creditsCost} 💎</strong>)</span>
+                <span className="text-amber-400 font-bold">Destaque imediato no chat</span>
               </div>
 
               <button
@@ -1100,7 +1100,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
               {/* Price if Individual */}
               {newLiveFormat === 'individual' && (
                 <div className="space-y-1.5">
-                  <label className="font-semibold text-slate-300">Preço em Créditos para o Show Íntimo:</label>
+                  <label className="font-semibold text-slate-300">Preço em Diamantes (💎) para o Show Íntimo:</label>
                   <input
                     type="number"
                     min={10}
@@ -1110,7 +1110,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
                     className="w-full bg-[#181828] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-rose-500 font-mono"
                   />
                   <span className="text-[11px] text-slate-400">
-                    O ingresso de {newLivePrice} créditos (R$ {(newLivePrice * 0.1).toFixed(2)}) repassará 70% (R$ {(newLivePrice * 0.1 * 0.7).toFixed(2)}) diretamente à sua conta.
+                    Ingresso configurado em {newLivePrice} 💎. A remuneração do criador segue a regra contábil 70/20/10 sobre diamantes comprados (pagos) consumidos, auditada no Ledger.
                   </span>
                 </div>
               )}

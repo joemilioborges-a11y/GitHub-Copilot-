@@ -323,6 +323,80 @@ export async function runLedgerVerificationSuite(): Promise<{
     }
   }
 
+  // TESTE 7: Estorno Compensatório (Refund) e Dedução de Passivo de Criador + Agregação queryLedger
+  {
+    const start = performance.now();
+    try {
+      const buyerId = `buyer_refund_${Date.now()}`;
+      const creatorId = `creator_refund_${Date.now()}`;
+
+      await financialLedger.purchaseCreditPackage({
+        userId: buyerId,
+        packageId: 'pkg_popular_150',
+        packageName: 'Popular',
+        creditsToGrant: 170,
+        priceBrl: 29.90,
+        gateway: 'pix',
+        idempotencyKey: `idemp_fund_refund_${Date.now()}`,
+      });
+
+      const unlockRes = await financialLedger.unlockPaidContent({
+        userId: buyerId,
+        creatorId,
+        creatorName: 'Criador Estorno Teste',
+        contentId: 'photo_refund_test_01',
+        contentTitle: 'Foto Exclusiva 49 Diamantes',
+        priceCredits: 49,
+        idempotencyKey: `idemp_unlock_refund_${Date.now()}`,
+        creatorSharePct: 0.70,
+      });
+
+      const creatorBeforeRefund = financialLedger.getCreatorBalances(creatorId);
+      const creatorShareEntry = unlockRes.entries.find(
+        (e) => e.operationType === 'CREATOR_REVENUE_SHARE'
+      );
+
+      if (!creatorShareEntry) {
+        throw new Error('Lançamento CREATOR_REVENUE_SHARE não encontrado.');
+      }
+
+      // Executa estorno do lançamento de repasse do criador
+      await financialLedger.processRefund({
+        originalEntryId: creatorShareEntry.id,
+        reason: 'Estorno de auditoria de teste',
+        adminId: 'admin_auditor',
+        idempotencyKey: `idemp_refund_creator_share_${Date.now()}`,
+      });
+
+      const creatorAfterRefund = financialLedger.getCreatorBalances(creatorId);
+      const ledgerQuery = financialLedger.queryLedger({ actorId: buyerId });
+
+      const passed =
+        creatorBeforeRefund.pendingBrl === 3.43 &&
+        creatorAfterRefund.pendingBrl === 0 &&
+        creatorAfterRefund.totalEarnedBrl === 0 &&
+        creatorAfterRefund.unlockedContentsCount === 0 &&
+        ledgerQuery.stats.totalCreditsCredited >= 170 &&
+        ledgerQuery.stats.totalCreditsDebited >= 49;
+
+      results.push({
+        testName: 'Dedução de Passivo de Criador em Estorno (processRefund) e Agregação queryLedger',
+        passed,
+        message: passed
+          ? `Aprovado: Passivo pendente do criador zerado após estorno (R$ ${creatorBeforeRefund.pendingBrl.toFixed(2)} -> R$ ${creatorAfterRefund.pendingBrl.toFixed(2)}) e queryLedger.stats agregou ${ledgerQuery.stats.totalCreditsCredited} creditados / ${ledgerQuery.stats.totalCreditsDebited} debitados.`
+          : `Falha: Antes=${creatorBeforeRefund.pendingBrl}, Depois=${creatorAfterRefund.pendingBrl}, TotalEarned=${creatorAfterRefund.totalEarnedBrl}, Debited=${ledgerQuery.stats.totalCreditsDebited}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    } catch (e: any) {
+      results.push({
+        testName: 'Dedução de Passivo de Criador em Estorno (processRefund)',
+        passed: false,
+        message: `Exceção: ${e?.message || e}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    }
+  }
+
   const allPassed = results.every((r) => r.passed);
   return { allPassed, results };
 }
@@ -340,7 +414,7 @@ if (isDirectCliExecution) {
     console.log(`======================================================`);
     results.forEach((r, idx) => {
       const icon = r.passed ? '✅' : '❌';
-      console.log(`${icon} [${idx + 1}/6] ${r.testName} (${r.durationMs}ms)`);
+      console.log(`${icon} [${idx + 1}/${results.length}] ${r.testName} (${r.durationMs}ms)`);
       console.log(`   ${r.message}`);
     });
     console.log(`======================================================`);

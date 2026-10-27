@@ -4,38 +4,123 @@ import {
   TrendingUp,
   Calendar,
   Lock,
-  Eye,
   ShieldCheck,
   ShieldAlert,
-  Clock,
   CheckCircle2,
-  AlertCircle,
-  FileText,
   Sliders,
   DollarSign,
-  Coins,
   Camera,
   Video,
-  Flame,
-  Award,
   Layers,
-  Search,
-  Filter,
-  Check,
-  ChevronRight,
   Upload,
-  RefreshCw,
-  Zap,
 } from 'lucide-react';
+import {
+  exclusiveContentAndInterestService,
+  ExclusiveMediaType,
+  ExclusiveMonetizationModality,
+  calculateSplit70_20_10Cents,
+  formatDiamondsDisplay,
+} from '../../services/exclusiveContentAndInterestService';
 
 export const JobsCreatorStudio: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'performance' | 'editorial' | 'pricing' | 'trust_safety'>('performance');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<
+    'performance' | 'exclusive_vault' | 'editorial' | 'pricing' | 'trust_safety'
+  >('performance');
+  const [selectedCreatorId, setSelectedCreatorId] = useState<'valentina' | 'isabella'>('valentina');
+  const [refreshTick, setRefreshTick] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Formulário de publicação de foto/vídeo em diamantes (💎)
+  const [newMediaType, setNewMediaType] = useState<ExclusiveMediaType>('photo');
+  const [newModality, setNewModality] = useState<ExclusiveMonetizationModality>('INDIVIDUAL_UNLOCK');
+  const [newCaption, setNewCaption] = useState('');
+  const [newPriceDiamondsInput, setNewPriceDiamondsInput] = useState('49');
+  const [vaultPriceDiamondsInput, setVaultPriceDiamondsInput] = useState('149');
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const creatorSummary = useMemo(
+    () => exclusiveContentAndInterestService.getCreatorDashboardSummary(selectedCreatorId, 'sandbox'),
+    [selectedCreatorId, refreshTick]
+  );
+
+  const platformReconciliation = useMemo(
+    () => exclusiveContentAndInterestService.getPlatformReconciliationReport('sandbox'),
+    [refreshTick]
+  );
+
+  const creatorMediaItems = useMemo(
+    () =>
+      exclusiveContentAndInterestService.listPublicMediaForProfile({
+        creatorId: selectedCreatorId,
+        viewerUserId: selectedCreatorId,
+        includeNonPublishedForCreatorOrAdmin: true,
+      }),
+    [selectedCreatorId, refreshTick]
+  );
+
+  const vaultConfig = useMemo(
+    () => exclusiveContentAndInterestService.getVipVaultConfig(selectedCreatorId),
+    [selectedCreatorId, refreshTick]
+  );
+
+  const handlePublishNewMedia = (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const parsedPriceDiamonds =
+        newModality === 'INDIVIDUAL_UNLOCK'
+          ? Math.round(Number(newPriceDiamondsInput))
+          : 0;
+      const item = exclusiveContentAndInterestService.publishOrCreateMedia({
+        creatorId: selectedCreatorId,
+        creatorName: selectedCreatorId === 'valentina' ? 'Valentina Rossi' : 'Isabella Fontes',
+        mediaType: newMediaType,
+        modality: newModality,
+        caption:
+          newCaption.trim() ||
+          `${newMediaType === 'video' ? 'Vídeo Exclusivo' : 'Foto Exclusiva'} (${
+            newModality === 'VIP_VAULT' ? 'Cofre VIP' : 'Desbloqueio Individual'
+          })`,
+        priceDiamonds: parsedPriceDiamonds,
+        classification: newModality === 'VIP_VAULT' ? 'consensual_nudity_18plus' : 'sensual',
+        ageVerified18Plus: true,
+        consentDeclared: true,
+        safePreviewUrl:
+          selectedCreatorId === 'valentina'
+            ? '/src/assets/images/profile_valentina_1791856836634.jpg'
+            : '/src/assets/images/profile_isabella_1791856837043.jpg',
+        privateMasterUrl: `private://vault/${selectedCreatorId}/${Date.now()}_master.${
+          newMediaType === 'video' ? 'mp4' : 'jpg'
+        }`,
+        initialState: 'published',
+      });
+      setNewCaption('');
+      setRefreshTick((t) => t + 1);
+      showToast(
+        `Mídia publicada com sucesso (${
+          item.modality === 'VIP_VAULT' ? 'Cofre VIP' : `Individual ${formatDiamondsDisplay(item.priceDiamonds)}`
+        })!`
+      );
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao publicar mídia.');
+    }
+  };
+
+  const handleUpdateVaultPrice = () => {
+    try {
+      const diamonds = Math.round(Number(vaultPriceDiamondsInput));
+      const updated = exclusiveContentAndInterestService.updateVipVaultConfig({
+        creatorId: selectedCreatorId,
+        priceDiamonds: diamonds,
+      });
+      setRefreshTick((t) => t + 1);
+      showToast(`Preço do Cofre VIP atualizado para ${formatDiamondsDisplay(updated.priceDiamonds)} (${updated.durationDays} dias)!`);
+    } catch (err: any) {
+      showToast(err?.message || 'Preço em diamantes inválido.');
+    }
   };
 
   // Métricas Consolidadas de Performance (Padrão Internacional)
@@ -71,7 +156,7 @@ export const JobsCreatorStudio: React.FC = () => {
   ];
 
   // Calendário Editorial e Agendamento
-  const [scheduledPosts, setScheduledPosts] = useState([
+  const [scheduledPosts] = useState([
     {
       id: 'post_01',
       creator: 'Valentina Rossi',
@@ -111,7 +196,7 @@ export const JobsCreatorStudio: React.FC = () => {
   ]);
 
   // Regras de Precificação Dinâmica
-  const [pricingRules, setPricingRules] = useState([
+  const [pricingRules] = useState([
     {
       id: 'cat_photos',
       label: 'Fotos Sensuais & Boudoir',
@@ -174,13 +259,14 @@ export const JobsCreatorStudio: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-              Central estratégica de inteligência de conteúdo, monetização, conversão de prévias, calendário editorial e proteção de direitos autorais de criadores homologados.
+              Central estratégica de publicação de fotos e vídeos individuais, Cofre VIP independente, regra contábil 70/30 e reconciliação em ambiente Sandbox.
             </p>
           </div>
 
-          <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-950 border border-slate-800 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-2xl bg-slate-950 border border-slate-800 shrink-0">
             {[
               { id: 'performance', label: 'Desempenho & Conversão', icon: TrendingUp },
+              { id: 'exclusive_vault', label: 'Mídias, Cofre VIP & 70/30', icon: DollarSign },
               { id: 'editorial', label: 'Calendário Editorial', icon: Calendar },
               { id: 'pricing', label: 'Precificação & Paywall', icon: Sliders },
               { id: 'trust_safety', label: 'Trust & Direitos', icon: ShieldCheck },
@@ -243,9 +329,9 @@ export const JobsCreatorStudio: React.FC = () => {
             <div className="space-y-3">
               {[
                 { label: 'Vídeos Privados 4K (Teaser de 10s)', rate: 41.2, totalUnlocks: 4890, avgBrl: 'R$ 82,40' },
-                { label: 'Transmissões VIP & Desafios de Look', rate: 34.6, totalUnlocks: 3120, avgBrl: 'R$ 74,10' },
-                { label: 'Ensaios Fotográficos Boudoir (Blur 70%)', rate: 26.8, totalUnlocks: 5640, avgBrl: 'R$ 58,00' },
-                { label: 'Chat Direto & Mimos Personalizados', rate: 19.5, totalUnlocks: 1820, avgBrl: 'R$ 95,00' },
+                { label: 'Cofre VIP Exclusivo (+18 Consentido)', rate: 36.8, totalUnlocks: 3490, avgBrl: 'R$ 49,90' },
+                { label: 'Ensaios Fotográficos Individuais (Blur)', rate: 26.8, totalUnlocks: 5640, avgBrl: 'R$ 24,90' },
+                { label: 'Envio de Interesse Imediato (Pré-Match)', rate: 23.4, totalUnlocks: 2150, avgBrl: 'R$ 19,90' },
               ].map((item, i) => (
                 <div key={i} className="space-y-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800/80">
                   <div className="flex items-center justify-between text-xs">
@@ -264,6 +350,254 @@ export const JobsCreatorStudio: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-ABA NOVA: PUBLICAÇÃO DE FOTOS/VÍDEOS, COFRE VIP E EXTRATO 70/20/10 */}
+      {activeTab === 'exclusive_vault' && (
+        <div className="space-y-5">
+          {/* Seletor de Criador e Resumo Financeiro 70/20/10 */}
+          <div className="p-5 rounded-3xl bg-[#0f0f18] border border-slate-800 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+              <div>
+                <h4 className="text-sm font-bold text-white">
+                  Gestão de Conteúdo Exclusivo, Cofre VIP & Partição Contábil 70/20/10
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Preços ao cliente em 💎 · Contabilidade interna: 70% Criador · 20% Receita JOBS · 10% Reserva Operacional (1 💎 pago = R$ 0,10)
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {(['valentina', 'isabella'] as const).map((cid) => (
+                  <button
+                    key={cid}
+                    onClick={() => setSelectedCreatorId(cid)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${
+                      selectedCreatorId === cid
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'bg-slate-900 text-slate-300 border border-slate-800'
+                    }`}
+                  >
+                    {cid === 'valentina' ? 'Valentina Rossi' : 'Isabella Fontes'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
+                <span className="text-slate-400 block text-[10px]">Diamantes Recebidos</span>
+                <strong className="text-lg font-mono text-white">
+                  {creatorSummary.totalDiamondsReceived} 💎
+                </strong>
+                <span className="text-[10px] text-slate-500 block">
+                  Pagos: {creatorSummary.paidDiamondsReceived} 💎 · Bônus: {creatorSummary.bonusDiamondsReceived} 💎
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/30">
+                <span className="text-emerald-400 block text-[10px]">Repasse Criador (70%)</span>
+                <strong className="text-lg font-mono text-emerald-300">
+                  R$ {creatorSummary.creatorShare70Brl.toFixed(2)}
+                </strong>
+                <span className="text-[10px] text-slate-500 block">
+                  Disponível: R$ {creatorSummary.availableBalanceBrl.toFixed(2)}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-amber-500/30">
+                <span className="text-amber-400 block text-[10px]">Receita JOBS (20%)</span>
+                <strong className="text-lg font-mono text-amber-300">
+                  R$ {creatorSummary.platformShare20Brl.toFixed(2)}
+                </strong>
+                <span className="text-[10px] text-slate-500 block">Margem líquida plataforma</span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-indigo-500/30">
+                <span className="text-indigo-400 block text-[10px]">Reserva Operacional (10%)</span>
+                <strong className="text-lg font-mono text-indigo-300">
+                  R$ {creatorSummary.operationalReserve10Brl.toFixed(2)}
+                </strong>
+                <span className="text-[10px] text-slate-500 block">Taxas, antifraude & estornos</span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
+                <span className="text-slate-400 block text-[10px]">Catálogo Publicado (+18)</span>
+                <strong className="text-lg font-mono text-white">
+                  {creatorSummary.publishedIndividualPhotosCount +
+                    creatorSummary.publishedIndividualVideosCount +
+                    creatorSummary.publishedVipVaultItemsCount}{' '}
+                  mídias
+                </strong>
+                <span className="text-[10px] text-amber-300 font-mono block">
+                  Cofre VIP: {vaultConfig.priceDiamonds} 💎 ({vaultConfig.durationDays}d)
+                </span>
+              </div>
+            </div>
+
+            {/* Formulário de Publicação de Nova Foto/Vídeo e Configuração do Cofre VIP */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+              <form
+                onSubmit={handlePublishNewMedia}
+                className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 text-xs"
+              >
+                <div className="font-bold text-white flex items-center justify-between">
+                  <span>Publicar Nova Foto ou Vídeo Exclusivo</span>
+                  <span className="text-[10px] font-mono text-emerald-400">+18 & Consentimento Verificados</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Tipo de Conteúdo</label>
+                    <select
+                      value={newMediaType}
+                      onChange={(e) => {
+                        const type = e.target.value as ExclusiveMediaType;
+                        setNewMediaType(type);
+                        setNewPriceDiamondsInput(type === 'video' ? '99' : '49');
+                      }}
+                      className="w-full rounded-xl bg-slate-900 border border-slate-700 px-2.5 py-2 text-white text-xs"
+                    >
+                      <option value="photo">Foto Exclusiva (Padrão 49 💎)</option>
+                      <option value="video">Vídeo Exclusivo (Padrão 99 💎)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Modalidade de Monetização</label>
+                    <select
+                      value={newModality}
+                      onChange={(e) => setNewModality(e.target.value as ExclusiveMonetizationModality)}
+                      className="w-full rounded-xl bg-slate-900 border border-slate-700 px-2.5 py-2 text-white text-xs"
+                    >
+                      <option value="INDIVIDUAL_UNLOCK">Desbloqueio Individual (💎)</option>
+                      <option value="VIP_VAULT">Cofre VIP Independente</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-1">Legenda da Publicação</label>
+                  <input
+                    type="text"
+                    value={newCaption}
+                    onChange={(e) => setNewCaption(e.target.value)}
+                    placeholder="Ex: Ensaio exclusivo iluminação noturna (+18)"
+                    className="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-white text-xs"
+                  />
+                </div>
+
+                {newModality === 'INDIVIDUAL_UNLOCK' && (
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Preço Individual em Diamantes (💎)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={newPriceDiamondsInput}
+                      onChange={(e) => setNewPriceDiamondsInput(e.target.value)}
+                      className="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-white font-mono text-xs"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer"
+                >
+                  Publicar Mídia com Preço em Diamantes (💎)
+                </button>
+              </form>
+
+              <div className="p-4 rounded-2xl bg-slate-950 border border-amber-500/30 space-y-3 text-xs flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="font-bold text-white flex items-center justify-between">
+                    <span>Configuração do Cofre VIP Independente</span>
+                    <span className="text-[10px] font-mono text-amber-300">
+                      Atual: {vaultConfig.priceDiamonds} 💎 ({vaultConfig.durationDays} dias)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    O acesso ao Cofre VIP é exibido ao cliente exclusivamente em diamantes (padrão 149 💎 por 30 dias).
+                    Na contabilidade interna, diamantes pagos geram base elegível (1 💎 pago = R$ 0,10) com partição 70% Criador / 20% JOBS / 10% Reserva Operacional.
+                  </p>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Novo Preço do Passe Cofre VIP (💎)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={vaultPriceDiamondsInput}
+                        onChange={(e) => setVaultPriceDiamondsInput(e.target.value)}
+                        className="flex-1 rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-white font-mono text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleUpdateVaultPrice}
+                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer"
+                      >
+                        Salvar Preço (💎)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1 font-mono text-[11px]">
+                  <div className="text-slate-300 font-bold">
+                    Reconciliação Contábil 70/20/10 ({platformReconciliation.isStrictlyReconciled ? '100% Conciliado' : 'Divergente'})
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Diamantes Consumidos (Pagos / Bônus):</span>
+                    <span className="text-white">
+                      {platformReconciliation.totalPaidDiamondsConsumed} 💎 pagos / {platformReconciliation.totalBonusDiamondsConsumed} 💎 bônus
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Base Fiduciária Líquida Elegível:</span>
+                    <span className="text-white">R$ {platformReconciliation.netRecognizedRevenueBrl.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-emerald-400">
+                    <span>70% Líquido Criadores:</span>
+                    <span>R$ {platformReconciliation.netCreatorObligationsBrl.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-amber-400">
+                    <span>20% Receita JOBS + 10% Reserva:</span>
+                    <span>
+                      R$ {platformReconciliation.netPlatformShare20Brl.toFixed(2)} + R$ {platformReconciliation.netOperationalReserve10Brl.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Lista de Mídias Publicadas do Criador */}
+            <div className="pt-2 space-y-2">
+              <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Mídias do Perfil ({creatorMediaItems.length})
+              </h5>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {creatorMediaItems.map((item) => {
+                  const split = calculateSplit70_20_10Cents(item.priceCents);
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-white">{item.caption}</span>
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-400">
+                          {item.mediaType.toUpperCase()} ·{' '}
+                          {item.modality === 'VIP_VAULT'
+                            ? `Incluso no Cofre VIP (${vaultConfig.priceDiamonds} 💎)`
+                            : `Avulso ${item.priceDiamonds} 💎 (70% pago: R$ ${split.creatorShareBrl.toFixed(2)})`}{' '}
+                          · Estado: {item.state}
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30 text-[10px] font-mono shrink-0">
+                        {item.unlockCount} desbloqueios
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -372,7 +706,7 @@ export const JobsCreatorStudio: React.FC = () => {
                 <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-900">
                   <span>Prévia Grátis: {rule.previewTimeSec > 0 ? `${rule.previewTimeSec}s de teaser` : 'Blur estático'}</span>
                   <span className={rule.autoWatermark ? 'text-emerald-400' : 'text-slate-500'}>
-                    {rule.autoWatermark ? '✓ Marca d\'água ativa' : '— Sem marca'}
+                    {rule.autoWatermark ? "✓ Marca d'água ativa" : '— Sem marca'}
                   </span>
                 </div>
               </div>
@@ -433,3 +767,4 @@ export const JobsCreatorStudio: React.FC = () => {
     </div>
   );
 };
+

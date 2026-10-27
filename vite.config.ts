@@ -3,6 +3,12 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+// Prevent Vite from registering process.stdin.on('end', closeServerAndExit)
+// when spawned in non-interactive pre-warming environments where stdin is closed.
+if (!process.env.CI) {
+  process.env.CI = 'true';
+}
+
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],

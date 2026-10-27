@@ -558,7 +558,7 @@ class MonetizationDomainService {
         contentType: 'photo_fashion_lingerie',
         previewAssetId: '/src/assets/images/profile_valentina_1791856836634.jpg',
         privateAssetId: '/src/assets/images/vip_exclusive_glamour_1791856838011.jpg',
-        priceInCredits: 60,
+        priceInCredits: 49,
         isFree: false,
         moderationStatus: 'approved',
         ageRestricted: true,
@@ -578,7 +578,7 @@ class MonetizationDomainService {
         contentType: 'video_exclusive',
         previewAssetId: '/src/assets/images/profile_valentina_1791856836634.jpg',
         privateAssetId: '/src/assets/images/vip_exclusive_glamour_1791856838011.jpg',
-        priceInCredits: 120,
+        priceInCredits: 99,
         isFree: false,
         moderationStatus: 'approved',
         ageRestricted: true,
@@ -598,7 +598,7 @@ class MonetizationDomainService {
         contentType: 'photo_sensual',
         previewAssetId: '/src/assets/images/profile_isabella_1791856837043.jpg',
         privateAssetId: '/src/assets/images/vip_exclusive_glamour_1791856838011.jpg',
-        priceInCredits: 80,
+        priceInCredits: 49,
         isFree: false,
         moderationStatus: 'approved',
         ageRestricted: true,
@@ -1419,14 +1419,14 @@ class MonetizationDomainService {
       'Desbloqueio',
       async () => {
         const u = `user_buyer_${Date.now()}`;
-        const wallet = this.getWallet(u); // 150 créditos
+        const wallet = this.getWallet(u); // 150 💎
         const res = await this.unlockContent({
           userId: u,
-          contentId: 'cnt_val_01', // 60 créditos
+          contentId: 'cnt_val_01', // 49 💎 (foto exclusiva padronizada)
           idempotencyKey: `idemp_buyer_${Date.now()}`,
         });
         const has = this.hasAccess(u, 'cnt_val_01');
-        return has && res.remainingBalance === 90 && res.token.expiresAt !== undefined;
+        return has && res.remainingBalance === wallet.balance - 49 && res.token.expiresAt !== undefined;
       },
       'Aprovado: Concessão de acesso gravada e saldo deduzido atomicamente.'
     );

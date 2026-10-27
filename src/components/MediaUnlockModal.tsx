@@ -145,11 +145,11 @@ export const MediaUnlockModal: React.FC<MediaUnlockModalProps> = ({
 
               <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-300 text-sm font-mono font-bold">
                 <Coins className="w-4 h-4" />
-                <span>Valor: {media.priceCredits} Créditos</span>
+                <span>Valor: {media.priceCredits} 💎</span>
               </div>
 
               <div className="text-[11px] text-slate-400">
-                Seu saldo: <strong className="text-white font-mono">{userCredits} créditos</strong>
+                Seu saldo: <strong className="text-white font-mono">{userCredits} 💎</strong>
               </div>
             </div>
           )}
@@ -169,16 +169,16 @@ export const MediaUnlockModal: React.FC<MediaUnlockModalProps> = ({
                     <span className="font-bold text-white text-right truncate max-w-[180px]">{media.title}</span>
                   </div>
                   <div className="flex justify-between pb-2 border-b border-slate-800">
-                    <span className="text-slate-400">Preço em créditos:</span>
-                    <span className="font-bold text-amber-400 font-mono">💎 {media.priceCredits}</span>
+                    <span className="text-slate-400">Preço em diamantes:</span>
+                    <span className="font-bold text-amber-400 font-mono">{media.priceCredits} 💎</span>
                   </div>
                   <div className="flex justify-between pb-2 border-b border-slate-800">
                     <span className="text-slate-400">Saldo atual da carteira:</span>
-                    <span className="font-bold text-white font-mono">{userCredits} créditos</span>
+                    <span className="font-bold text-white font-mono">{userCredits} 💎</span>
                   </div>
                   <div className="flex justify-between pt-1">
                     <span className="text-slate-300 font-semibold">Saldo após a operação:</span>
-                    <span className="font-extrabold text-emerald-400 font-mono">{balanceAfter} créditos</span>
+                    <span className="font-extrabold text-emerald-400 font-mono">{balanceAfter} 💎</span>
                   </div>
                 </div>
 
@@ -274,25 +274,25 @@ export const MediaUnlockModal: React.FC<MediaUnlockModalProps> = ({
                 </button>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Enviar mimo:</span>
+                  <span className="text-xs text-slate-400">Enviar presente:</span>
                   <button
-                    onClick={() => handleTip(20)}
+                    onClick={() => handleTip(29)}
                     className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-amber-500/30 transition-colors cursor-pointer"
                   >
-                    20 💎
+                    29 💎
                   </button>
                   <button
-                    onClick={() => handleTip(50)}
+                    onClick={() => handleTip(49)}
                     className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-colors cursor-pointer"
                   >
-                    50 💎
+                    49 💎
                   </button>
                 </div>
               </div>
 
               {tipSuccess && (
                 <div className="p-2 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs text-center font-medium">
-                  Mimo enviado com sucesso para o criador! ❤️
+                  Presente enviado com sucesso para o criador! ❤️
                 </div>
               )}
             </div>
@@ -305,14 +305,14 @@ export const MediaUnlockModal: React.FC<MediaUnlockModalProps> = ({
                   className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-slate-950 font-extrabold text-sm transition-all shadow-lg shadow-amber-950/40 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Unlock className="w-4 h-4" />
-                  <span>Desbloquear Agora ({media.priceCredits} Créditos)</span>
+                  <span>Desbloquear Agora ({media.priceCredits} 💎)</span>
                 </button>
               ) : (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/40 text-xs text-rose-300">
                     <AlertCircle className="w-4 h-4 shrink-0" />
                     <span>
-                      Você precisa de mais {media.priceCredits - userCredits} créditos para desbloquear esta foto.
+                      Você precisa de mais {media.priceCredits - userCredits} 💎 para desbloquear esta mídia.
                     </span>
                   </div>
                   <button
@@ -320,7 +320,7 @@ export const MediaUnlockModal: React.FC<MediaUnlockModalProps> = ({
                     className="w-full py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-amber-950"
                   >
                     <Coins className="w-4 h-4" />
-                    <span>Adicionar Créditos via PIX / Cartão (Sandbox)</span>
+                    <span>Adicionar Diamantes na Carteira (💎)</span>
                   </button>
                 </div>
               )}

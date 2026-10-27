@@ -64,11 +64,11 @@ export const ProfileDetailModal: React.FC<ProfileDetailModalProps> = ({
 
   const handleSendQuickTip = (amount: number) => {
     if (userCredits < amount) {
-      alert(`Você precisa de ${amount} créditos para enviar este mimo. Recarregue sua carteira!`);
+      alert(`Você precisa de ${amount} 💎 para enviar este presente. Recarregue sua carteira!`);
       return;
     }
     onSendTip(profile, amount);
-    setTipSuccess(`Você enviou um mimo de ${amount} créditos para ${profile.name}! ❤️`);
+    setTipSuccess(`Você enviou um presente de ${amount} 💎 para ${profile.name}! ❤️`);
     setTimeout(() => setTipSuccess(null), 3500);
   };
 
@@ -516,31 +516,31 @@ export const ProfileDetailModal: React.FC<ProfileDetailModalProps> = ({
                 <Gift className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white">Envie um Mimo em Créditos</h4>
+                <h4 className="text-xs font-bold text-white">Envie um Presente em Diamantes (💎)</h4>
                 <p className="text-[11px] text-slate-400">
-                  Criadores recebem 100% dos mimos na sua carteira de saque
+                  Demonstre seu interesse e apoie {profile.name} com diamantes da sua carteira
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => handleSendQuickTip(25)}
+                onClick={() => handleSendQuickTip(29)}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-amber-500/30 transition-colors cursor-pointer"
               >
-                25 💎
+                29 💎
               </button>
               <button
-                onClick={() => handleSendQuickTip(50)}
+                onClick={() => handleSendQuickTip(49)}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-amber-500/30 transition-colors cursor-pointer"
               >
-                50 💎
+                49 💎
               </button>
               <button
-                onClick={() => handleSendQuickTip(100)}
+                onClick={() => handleSendQuickTip(99)}
                 className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition-colors cursor-pointer"
               >
-                100 💎
+                99 💎
               </button>
             </div>
           </div>
@@ -557,7 +557,7 @@ export const ProfileDetailModal: React.FC<ProfileDetailModalProps> = ({
                 }`}
               >
                 <Lock className="w-4 h-4" />
-                <span>Cofre VIP (+18 Exclusivo) ({profile.vipMedia.length})</span>
+                <span>Cofre VIP (+18 Exclusivo · 149 💎 / 30 dias) ({profile.vipMedia.length})</span>
               </button>
 
               <button
@@ -601,7 +601,7 @@ export const ProfileDetailModal: React.FC<ProfileDetailModalProps> = ({
                             Conteúdo Restrito (+18)
                           </span>
                           <span className="text-[11px] font-mono font-bold text-amber-400 bg-black/60 px-2 py-0.5 rounded-full border border-amber-400/30">
-                            {media.priceCredits} Créditos para Assistir
+                            {media.priceCredits} 💎 para Desbloquear
                           </span>
                         </div>
                       )}

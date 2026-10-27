@@ -203,11 +203,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onOpenWallet}
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-amber-500/10 to-rose-500/10 hover:from-amber-500/20 hover:to-rose-500/20 border border-amber-500/30 rounded-xl transition-all cursor-pointer text-xs font-semibold text-amber-300 shadow-sm"
-            title="Carteira & Créditos JOBS"
+            title="Carteira de Diamantes JOBS"
           >
             <Coins className="w-3.5 h-3.5 text-amber-400" />
             <span className="font-mono font-bold text-white">{creditsBalance}</span>
-            <span className="hidden sm:inline text-amber-400/90 text-[11px]">Créditos</span>
+            <span className="hidden sm:inline text-amber-400/90 text-[11px]">💎</span>
           </button>
         </div>
       </div>

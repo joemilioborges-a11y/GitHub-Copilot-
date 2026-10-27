@@ -15,6 +15,10 @@ import {
   RevenueReportPeriodFilter,
   RevenueAndEarningsReportResult,
 } from '../utils/revenueAndEarningsReport';
+import {
+  calculateLedgerSha256,
+  LEDGER_SHA256_PROTOCOL_VERSION,
+} from '../utils/ledgerSha256Validator';
 
 export type AccountCurrency = 'CREDITS' | 'BRL';
 
@@ -159,6 +163,8 @@ export interface LedgerEntry {
   metadata?: Record<string, unknown>;
   previousHash: string;
   entryHash: string;
+  sha256ReferenceHash?: string;
+  sha256ProtocolVersion?: string;
 }
 
 export interface LedgerAuditRecord {
@@ -517,12 +523,18 @@ class FinancialLedgerService {
 
       if (entry.creditAccount === creatorAccount || entry.creditAccount === creatorAvailAccount) {
         totalEarnedBrl += entry.amount;
-        if (entry.operationType === 'CONTENT_UNLOCK') unlockedContentsCount++;
-        if (entry.operationType === 'TIP_GIFT') tipsReceivedCount++;
+        if (entry.status === 'posted' && entry.operationType === 'CONTENT_UNLOCK') unlockedContentsCount++;
+        if (entry.status === 'posted' && entry.operationType === 'TIP_GIFT') tipsReceivedCount++;
       }
 
       if (entry.creditAccount === creatorAccount) {
         pendingBrl += entry.amount;
+      }
+      if (entry.debitAccount === creatorAccount) {
+        pendingBrl -= entry.amount;
+        if (entry.operationType === 'REFUND' || entry.operationType === 'ADMIN_ADJUSTMENT') {
+          totalEarnedBrl -= entry.amount;
+        }
       }
       if (entry.creditAccount === creatorAvailAccount) {
         availableBrl += entry.amount;
@@ -532,6 +544,9 @@ class FinancialLedgerService {
       }
       if (entry.debitAccount === creatorAvailAccount) {
         availableBrl -= entry.amount;
+        if (entry.operationType === 'REFUND' || entry.operationType === 'ADMIN_ADJUSTMENT') {
+          totalEarnedBrl -= entry.amount;
+        }
         if (entry.operationType === 'PAYOUT_RESERVE' || entry.operationType === 'PAYOUT_SETTLED') {
           totalWithdrawnBrl += entry.amount;
         }
@@ -540,10 +555,10 @@ class FinancialLedgerService {
 
     return {
       creatorId,
-      pendingBrl: Number(pendingBrl.toFixed(2)),
-      availableBrl: Number(availableBrl.toFixed(2)),
-      totalEarnedBrl: Number(totalEarnedBrl.toFixed(2)),
-      totalWithdrawnBrl: Number(totalWithdrawnBrl.toFixed(2)),
+      pendingBrl: Number(Math.max(0, pendingBrl).toFixed(2)),
+      availableBrl: Number(Math.max(0, availableBrl).toFixed(2)),
+      totalEarnedBrl: Number(Math.max(0, totalEarnedBrl).toFixed(2)),
+      totalWithdrawnBrl: Number(Math.max(0, totalWithdrawnBrl).toFixed(2)),
       unlockedContentsCount,
       tipsReceivedCount,
     };
@@ -581,14 +596,17 @@ class FinancialLedgerService {
         if (entry.creditAccount.startsWith('CREATOR_PENDING_BRL:') || entry.creditAccount.startsWith('CREATOR_AVAILABLE_BRL:')) {
           totalCreatorLiabilities += entry.amount;
         }
+        if (entry.debitAccount.startsWith('CREATOR_PENDING_BRL:') || entry.debitAccount.startsWith('CREATOR_AVAILABLE_BRL:')) {
+          totalCreatorLiabilities -= entry.amount;
+        }
       }
     }
 
     return {
       totalCreditsInCirculation: Math.max(0, totalCredits),
-      totalFiatEscrowBrl: Number(totalEscrow.toFixed(2)),
-      totalPlatformRevenueBrl: Number(totalRevenue.toFixed(2)),
-      totalCreatorLiabilitiesBrl: Number(totalCreatorLiabilities.toFixed(2)),
+      totalFiatEscrowBrl: Number(Math.max(0, totalEscrow).toFixed(2)),
+      totalPlatformRevenueBrl: Number(Math.max(0, totalRevenue).toFixed(2)),
+      totalCreatorLiabilitiesBrl: Number(Math.max(0, totalCreatorLiabilities).toFixed(2)),
       totalTransactionsCount: entries.length,
       isSandboxAudited: true,
     };
@@ -747,7 +765,15 @@ class FinancialLedgerService {
           },
           previousHash,
           entryHash,
+          sha256ProtocolVersion: LEDGER_SHA256_PROTOCOL_VERSION,
         };
+
+        const { sha256Hash } = calculateLedgerSha256(entry);
+        entry.sha256ReferenceHash = sha256Hash;
+        if (entry.metadata) {
+          entry.metadata.sha256ReferenceHash = sha256Hash;
+          entry.metadata.sha256ProtocolVersion = LEDGER_SHA256_PROTOCOL_VERSION;
+        }
 
         newEntries.unshift(entry);
         previousHash = entryHash;
@@ -848,6 +874,12 @@ class FinancialLedgerService {
       };
     }
 
+    const matchedPkg = OFFICIAL_CREDIT_PACKAGES.find((p) => p.id === params.packageId);
+    const paidDiamondsGranted = matchedPkg
+      ? Math.min(params.creditsToGrant, matchedPkg.credits)
+      : params.creditsToGrant;
+    const bonusDiamondsGranted = Math.max(0, params.creditsToGrant - paidDiamondsGranted);
+
     const txRes = await this.postTransactionAtomic({
       idempotencyKey: params.idempotencyKey,
       description: `[SANDBOX] Compra do Pacote ${params.packageName}`,
@@ -867,6 +899,8 @@ class FinancialLedgerService {
             gateway: params.gateway,
             priceBrl: params.priceBrl,
             credits: params.creditsToGrant,
+            paidDiamondsGranted,
+            bonusDiamondsGranted,
           },
         },
         {
@@ -877,10 +911,13 @@ class FinancialLedgerService {
           amount: params.creditsToGrant,
           currency: 'CREDITS',
           referenceId: params.packageId,
-          description: `[SANDBOX] Concessão de ${params.creditsToGrant} créditos (Pacote ${params.packageName})`,
+          description: `[SANDBOX] Concessão de ${params.creditsToGrant} 💎 (${paidDiamondsGranted} comprados + ${bonusDiamondsGranted} bônus — Pacote ${params.packageName})`,
           metadata: {
             packageId: params.packageId,
             isNonWithdrawable: true,
+            paidDiamondsGranted,
+            bonusDiamondsGranted,
+            bonusFiduciaryValueCents: 0,
           },
         },
       ],
@@ -1984,7 +2021,12 @@ class FinancialLedgerService {
       else if (e.status === 'voided') voidedCount++;
 
       if (e.currency === 'CREDITS') {
-        totalCreditsCredited += e.amount;
+        if (e.creditAccount.startsWith('USER_CREDITS:')) {
+          totalCreditsCredited += e.amount;
+        }
+        if (e.debitAccount.startsWith('USER_CREDITS:')) {
+          totalCreditsDebited += e.amount;
+        }
       } else if (e.currency === 'BRL') {
         totalBrlMoved += e.amount;
       }

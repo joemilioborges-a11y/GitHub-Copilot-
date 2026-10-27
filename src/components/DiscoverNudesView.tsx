@@ -80,7 +80,7 @@ export const DiscoverNudesView: React.FC<DiscoverNudesViewProps> = ({
       return;
     }
     onSendTip(creatorName, amount);
-    setTipSuccess(`Mimo de ${amount} créditos enviado para ${creatorName}! ❤️`);
+    setTipSuccess(`Presente de ${amount} 💎 enviado para ${creatorName}! ❤️`);
     setTimeout(() => setTipSuccess(null), 3000);
   };
 
@@ -98,7 +98,7 @@ export const DiscoverNudesView: React.FC<DiscoverNudesViewProps> = ({
             </h1>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
-            Fotos secretas cobertas por névoa misteriosa. Pague os créditos necessários para queimar a película de censura e descobrir o nude em alta definição.
+            Fotos secretas cobertas por névoa misteriosa. Utilize 49 💎 por foto para revelar o conteúdo exclusivo em alta definição.
           </p>
         </div>
 
@@ -461,19 +461,19 @@ export const DiscoverNudesView: React.FC<DiscoverNudesViewProps> = ({
               )}
 
               <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-                <span className="text-xs text-slate-400">Gostou da foto? Envie um mimo:</span>
+                <span className="text-xs text-slate-400">Gostou da foto? Envie um presente:</span>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleSendTip(selectedItem.creatorName, 25)}
+                    onClick={() => handleSendTip(selectedItem.creatorName, 29)}
                     className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-amber-500/30 transition-colors cursor-pointer"
                   >
-                    25 💎
+                    29 💎
                   </button>
                   <button
-                    onClick={() => handleSendTip(selectedItem.creatorName, 50)}
+                    onClick={() => handleSendTip(selectedItem.creatorName, 49)}
                     className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-colors cursor-pointer"
                   >
-                    50 💎
+                    49 💎
                   </button>
                 </div>
               </div>

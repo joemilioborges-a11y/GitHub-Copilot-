@@ -352,6 +352,60 @@ async function main() {
     }
   }
 
+  console.log('\n========================================================================');
+  console.log('JOBS — 16 TESTES OBRIGATÓRIOS (9.1 a 9.7): MÍDIAS EXCLUSIVAS, COFRE VIP, INTERESSE IMEDIATO & 70/30');
+  console.log('========================================================================\n');
+
+  const { runExclusiveContentAndInterestTestSuite } = await import(
+    '../src/services/__tests__/exclusiveContentAndInterestService.test'
+  );
+  const exclMonetizationSummary = await runExclusiveContentAndInterestTestSuite();
+
+  for (const t of exclMonetizationSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id} | Seção ${t.section}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — 10 TESTES OBRIGATÓRIOS (SEÇÃO 9): SIMULADOR ADMINISTRATIVO DE RECEITA (70/20/10)');
+  console.log('========================================================================\n');
+
+  const { runRevenueSimulatorTestSuite } = await import(
+    '../src/services/__tests__/revenueSimulatorService.test'
+  );
+  const revSimSummary = await runRevenueSimulatorTestSuite();
+
+  for (const t of revSimSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — 12 TESTES OBRIGATÓRIOS: VISUALIZADOR E VALIDADOR DE AUDITORIA SHA-256');
+  console.log('========================================================================\n');
+
+  const { runLedgerSha256ValidatorTestSuite } = await import(
+    '../src/services/__tests__/ledgerSha256Validator.test'
+  );
+  const sha256AuditSummary = await runLedgerSha256ValidatorTestSuite();
+
+  for (const t of sha256AuditSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
   const grandTotal =
     summary.totalTests +
     withdrawalSummary.total +
@@ -371,7 +425,10 @@ async function main() {
     monthlyRecSummary.total +
     vrSimSummary.total +
     dlFiltersSummary.total +
-    revReportSummary.total;
+    revReportSummary.total +
+    exclMonetizationSummary.total +
+    revSimSummary.total +
+    sha256AuditSummary.total;
   const grandPassed =
     summary.passedCount +
     withdrawalSummary.passed +
@@ -391,7 +448,10 @@ async function main() {
     monthlyRecSummary.passed +
     vrSimSummary.passed +
     dlFiltersSummary.passed +
-    revReportSummary.passed;
+    revReportSummary.passed +
+    exclMonetizationSummary.passed +
+    revSimSummary.passed +
+    sha256AuditSummary.passed;
   const grandFailed =
     summary.failedCount +
     withdrawalSummary.failed +
@@ -411,14 +471,31 @@ async function main() {
     monthlyRecSummary.failed +
     vrSimSummary.failed +
     dlFiltersSummary.failed +
-    revReportSummary.failed;
+    revReportSummary.failed +
+    exclMonetizationSummary.failed +
+    revSimSummary.failed +
+    sha256AuditSummary.failed;
 
   console.log('\n========================================================================');
   console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
   console.log(`Total de Casos de Teste: ${grandTotal}`);
   console.log(`Aprovados:              ${grandPassed} (${((grandPassed / grandTotal) * 100).toFixed(1)}%)`);
   console.log(`Falhas:                 ${grandFailed}`);
-  console.log(`Tempo Total:            ${summary.executionDurationMs + contentUnlockSummary.executionDurationMs + auditSummary.durationMs + execFinancialSummary.durationMs + monthlyRecSummary.durationMs + vrSimSummary.durationMs + dlFiltersSummary.durationMs + revReportSummary.durationMs}ms`);
+  console.log(
+    `Tempo Total:            ${
+      summary.executionDurationMs +
+      contentUnlockSummary.executionDurationMs +
+      auditSummary.durationMs +
+      execFinancialSummary.durationMs +
+      monthlyRecSummary.durationMs +
+      vrSimSummary.durationMs +
+      dlFiltersSummary.durationMs +
+      revReportSummary.durationMs +
+      exclMonetizationSummary.durationMs +
+      revSimSummary.durationMs +
+      sha256AuditSummary.durationMs
+    }ms`
+  );
   console.log('========================================================================\n');
 
   if (grandFailed > 0) {

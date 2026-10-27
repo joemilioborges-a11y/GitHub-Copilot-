@@ -50,6 +50,7 @@ import { LiveStreamView } from './components/LiveStreamView';
 import { authService } from './utils/authService';
 import { financialLedger } from './services/ledgerService';
 import { matchAndMessagingService } from './services/matchAndMessagingService';
+import { exclusiveContentAndInterestService } from './services/exclusiveContentAndInterestService';
 
 import { Sparkles, Layers, ShieldCheck } from 'lucide-react';
 import { initGoogleAnalytics, trackPageView, trackEvent } from './utils/analytics';
@@ -146,7 +147,7 @@ export default function App() {
       startedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
       autoRenew: true,
-      priceBrl: 39.9,
+      priceBrl: 0,
       features: [
         'Curtidas ilimitadas diárias',
         'Ver quem curtiu seu perfil',
@@ -302,25 +303,39 @@ export default function App() {
 
   const handleSendInterest = (profile: Profile, message?: string) => {
     trackEvent('profile_super_interest', { profileId: profile.id, message });
-    const result = matchAndMessagingService.recordLike(currentUserId, profile.id, 'super_interest', message);
-
-    if (result.isMatch) {
-      if (!connections.some((c) => c.id === profile.id)) {
-        setConnections((prev) => {
-          const next = [profile, ...prev];
-          localStorage.setItem('jobs_user_connections', JSON.stringify(next));
-          return next;
-        });
+    if (matchAndMessagingService.isMutualMatch(currentUserId, profile.id)) {
+      if (message && message.trim()) {
+        matchAndMessagingService.sendMessage(currentUserId, profile.id, message.trim());
       }
-      setMatchedProfile(profile);
+      setActiveChatPartner(profile);
+      setActiveScreen('12_chat');
+      return;
     }
 
-    if (message && message.trim()) {
-      matchAndMessagingService.sendMessage(currentUserId, profile.id, message.trim());
-    }
-
-    setActiveChatPartner(profile);
-    setActiveScreen('12_chat');
+    exclusiveContentAndInterestService
+      .sendPaidImmediateInterest({
+        senderUserId: currentUserId,
+        recipientUserId: profile.id,
+        recipientName: profile.name,
+        idempotencyKey: `idemp_discover_interest_${currentUserId}_${profile.id}`,
+        initialMessage: message?.trim() || `Olá ${profile.name}! Enviei um interesse imediato no JOBS.`,
+        senderAgeVerified18Plus: true,
+        environment: 'sandbox',
+      })
+      .then(() => {
+        if (!connections.some((c) => c.id === profile.id)) {
+          setConnections((prev) => {
+            const next = [profile, ...prev];
+            localStorage.setItem('jobs_user_connections', JSON.stringify(next));
+            return next;
+          });
+        }
+        setActiveChatPartner(profile);
+        setActiveScreen('12_chat');
+      })
+      .catch((err) => {
+        console.error('Erro ao enviar interesse imediato:', err);
+      });
   };
 
   const handleBlockUser = (profile: Profile) => {

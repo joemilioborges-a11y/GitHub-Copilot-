@@ -304,7 +304,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
           className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-md shadow-amber-950/40 hover:scale-105 transition-transform relative z-10"
         >
           <Coins className="w-4 h-4" />
-          <span>{userCredits} Créditos</span>
+          <span>{userCredits} 💎</span>
         </button>
       </div>
 
@@ -651,17 +651,17 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
             <h3 className="text-sm font-bold text-white flex items-center gap-2 font-display">
               <ArrowDownRight className="w-4 h-4 text-emerald-400" />
-              <span>Valores a Receber & Transferência via PIX</span>
+              <span>Carteira de Diamantes & Repasses de Criador</span>
             </h3>
             <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-900/90 text-emerald-300 border border-emerald-700/50 uppercase">
-              Instantâneo 24/7
+              Auditado 70/20/10
             </span>
           </div>
           <p className="text-xs text-slate-300">
-            Você tem <strong className="text-emerald-400 font-mono font-bold">R$ {(userCredits * 0.10).toFixed(2).replace('.', ',')}</strong> ({userCredits} créditos) disponíveis para transferir diretamente para a sua conta bancária.
+            Saldo disponível para consumo em serviços: <strong className="text-emerald-400 font-mono font-bold">{userCredits} 💎</strong>. Diamantes promocionais (bônus) são exclusivos para uso na plataforma e não são sacáveis.
           </p>
           <span className="text-[11px] text-slate-400 block">
-            Basta informar sua chave PIX (CPF, Celular, E-mail ou Aleatória) e escolher seu banco para receber o comprovante imediato.
+            Repasses via PIX aplicam-se exclusivamente aos ganhos auditados de criadores sobre diamantes comprados (pagos) consumidos.
           </span>
         </div>
 
@@ -670,7 +670,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
           className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs transition-all shrink-0 cursor-pointer shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2"
         >
           <ArrowDownRight className="w-4 h-4" />
-          <span>Transferir para Meu Banco via PIX</span>
+          <span>Consultar Carteira & Repasses</span>
         </button>
       </div>
 

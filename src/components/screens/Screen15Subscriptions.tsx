@@ -1,18 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Crown,
   Check,
-  Zap,
   ShieldCheck,
-  CreditCard,
-  QrCode,
-  Copy,
-  Sparkles,
   ArrowRight,
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
 import { UserSubscription, SubscriptionTier } from '../../types';
+import {
+  exclusiveContentAndInterestService,
+  formatDiamondsDisplay,
+} from '../../services/exclusiveContentAndInterestService';
+import { authService } from '../../utils/authService';
 
 interface Screen15SubscriptionsProps {
   currentSubscription: UserSubscription;
@@ -23,20 +23,31 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
   currentSubscription,
   onUpgrade,
 }) => {
-  const [period, setPeriod] = useState<'monthly' | 'yearly'>('monthly');
-  const [selectedTier, setSelectedTier] = useState<SubscriptionTier>('vip');
-  const [paymentMethod, setPaymentMethod] = useState<'pix' | 'card'>('pix');
+  const currentUserId = authService.getCurrentSession()?.userId || 'user_emilio_vip';
+  const [selectedTier, setSelectedTier] = useState<SubscriptionTier>('premium');
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
-  const [copiedPix, setCopiedPix] = useState(false);
+  const [receiptSummary, setReceiptSummary] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [walletRefresh, setWalletRefresh] = useState(0);
+
+  const catalog = useMemo(
+    () => exclusiveContentAndInterestService.getDiamondServiceCatalog(),
+    [walletRefresh]
+  );
+
+  const buyerWallet = useMemo(
+    () => exclusiveContentAndInterestService.getUserDiamondWallet(currentUserId),
+    [currentUserId, walletRefresh]
+  );
 
   const plans = [
     {
       id: 'free' as SubscriptionTier,
       name: 'Gratuito',
       badge: 'Básico',
-      priceMonthly: 0,
-      priceYearly: 0,
+      priceDiamonds: 0,
+      durationDays: 30,
       description: 'Ideal para conhecer a plataforma e iniciar conexões autênticas.',
       features: [
         'Cadastro e perfil público',
@@ -56,11 +67,11 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
     },
     {
       id: 'premium' as SubscriptionTier,
-      name: 'Premium',
+      name: 'JOBS Premium',
       badge: 'Mais Popular',
-      priceMonthly: 39.9,
-      priceYearly: 29.9,
-      description: 'Mais alcance, filtros detalhados e curtidas sem limite diário.',
+      priceDiamonds: catalog.jobsPremiumDiamonds, // 199 💎 por 30 dias
+      durationDays: catalog.jobsPremiumDurationDays,
+      description: 'Mais alcance, filtros detalhados e curtidas sem limite diário por 30 dias.',
       features: [
         'Tudo do Plano Gratuito',
         'Curtidas ilimitadas diárias',
@@ -74,18 +85,18 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
         'Selo VIP Dourado no perfil',
         'Chamadas em vídeo HD com suporte dedicado',
       ],
-      buttonText: 'Assinar Premium',
-      highlight: false,
+      buttonText: `Assinar JOBS Premium (${formatDiamondsDisplay(catalog.jobsPremiumDiamonds)})`,
+      highlight: true,
     },
     {
       id: 'vip' as SubscriptionTier,
       name: 'VIP Exclusivo',
       badge: 'Exclusividade Total',
-      priceMonthly: 79.9,
-      priceYearly: 59.9,
-      description: 'Máxima visibilidade, suporte dedicado 24/7 e selo VIP dourado.',
+      priceDiamonds: 349,
+      durationDays: 30,
+      description: 'Máxima visibilidade, suporte dedicado 24/7 e selo VIP dourado por 30 dias.',
       features: [
-        'Tudo do Plano Premium',
+        'Tudo do Plano JOBS Premium',
         'Destaque no topo da Descoberta (Spotlight)',
         'Selo VIP Dourado de autenticidade',
         'Confirmação de leitura nas mensagens',
@@ -94,36 +105,45 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
         'Consultoria de bio e fotos por IA',
       ],
       notIncluded: [],
-      buttonText: 'Garantir Acesso VIP',
-      highlight: true,
+      buttonText: `Garantir Acesso VIP (${formatDiamondsDisplay(349)})`,
+      highlight: false,
     },
   ];
 
-  const currentPlan = plans.find((p) => p.id === selectedTier) || plans[2];
-  const activePrice = period === 'monthly' ? currentPlan.priceMonthly : currentPlan.priceYearly;
+  const currentPlan = plans.find((p) => p.id === selectedTier) || plans[1];
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (selectedTier === 'free') return;
     setIsProcessing(true);
+    setErrorMessage(null);
 
-    setTimeout(() => {
+    try {
+      const res = await exclusiveContentAndInterestService.purchaseJobsPremiumSubscription({
+        buyerUserId: currentUserId,
+        idempotencyKey: `idemp_sub_${selectedTier}_${currentUserId}_${Date.now()}`,
+        environment: 'sandbox',
+      });
+      setWalletRefresh((t) => t + 1);
       setIsProcessing(false);
       setCheckoutSuccess(true);
+      setReceiptSummary(res.customerReceipt.summaryText);
+
       const updatedSub: UserSubscription = {
         tier: selectedTier,
-        period,
+        period: 'monthly',
         startedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
+        expiresAt: new Date(Date.now() + currentPlan.durationDays * 86400000).toISOString(),
         autoRenew: true,
-        priceBrl: activePrice,
+        priceBrl: 0,
         features: currentPlan.features,
       };
       localStorage.setItem('jobs_user_subscription', JSON.stringify(updatedSub));
       onUpgrade(updatedSub);
-    }, 1500);
+    } catch (err: any) {
+      setIsProcessing(false);
+      setErrorMessage(err?.message || 'Saldo de diamantes insuficiente para ativar assinatura.');
+    }
   };
-
-  const simulatedPixCode = `00020126580014br.gov.bcb.pix0136jobs-pay-${Date.now()}520400005303986540${activePrice.toFixed(2)}5802BR5916JOBS PLATAFORMA6009SAO PAULO62070503***6304`;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-4 space-y-8">
@@ -131,40 +151,23 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
       <div className="text-center max-w-xl mx-auto space-y-2">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-300 text-xs font-bold border border-amber-500/20">
           <Crown className="w-3.5 h-3.5 text-amber-400" />
-          <span>Planos & Assinaturas JOBS</span>
+          <span>Planos & Assinaturas em Diamantes 💎</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-white">
           Escolha o nível ideal para suas conexões
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Sem taxas ocultas, cancele a qualquer momento direto no aplicativo.
+          Ative instantaneamente com os diamantes da sua carteira JOBS. Vigência de 30 dias.
         </p>
 
-        {/* Period Selector (Monthly vs Yearly) */}
-        <div className="inline-flex items-center bg-[#12121e] p-1 rounded-2xl border border-white/10 mt-3">
-          <button
-            onClick={() => setPeriod('monthly')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              period === 'monthly'
-                ? 'bg-rose-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Mensal
-          </button>
-          <button
-            onClick={() => setPeriod('yearly')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-              period === 'yearly'
-                ? 'bg-rose-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>Anual</span>
-            <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.2 rounded-full">
-              Economize 25%
-            </span>
-          </button>
+        <div className="inline-flex items-center gap-2 bg-[#12121e] px-4 py-2 rounded-2xl border border-amber-500/30 mt-3 text-xs">
+          <span className="text-slate-300">Seu Saldo Disponível:</span>
+          <strong className="font-mono text-amber-300">
+            {formatDiamondsDisplay(buyerWallet.totalAvailableDiamonds)}
+          </strong>
+          <span className="text-[11px] text-slate-500 font-mono">
+            (Comprados: {buyerWallet.purchasedDiamonds} 💎 · Bônus: {buyerWallet.bonusDiamonds} 💎)
+          </span>
         </div>
       </div>
 
@@ -173,12 +176,15 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
         {plans.map((p) => {
           const isSelected = selectedTier === p.id;
           const isCurrent = currentSubscription.tier === p.id;
-          const price = period === 'monthly' ? p.priceMonthly : p.priceYearly;
 
           return (
             <div
               key={p.id}
-              onClick={() => setSelectedTier(p.id)}
+              onClick={() => {
+                setSelectedTier(p.id);
+                setCheckoutSuccess(false);
+                setErrorMessage(null);
+              }}
               className={`p-6 rounded-3xl border transition-all cursor-pointer flex flex-col justify-between relative overflow-hidden ${
                 isSelected
                   ? p.highlight
@@ -189,7 +195,7 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
             >
               {p.highlight && (
                 <div className="absolute top-0 right-0 bg-gradient-to-l from-amber-500 to-rose-500 text-slate-950 font-black text-[10px] uppercase px-3 py-1 rounded-bl-xl shadow">
-                  Recomendado
+                  Oficial Catálogo
                 </div>
               )}
 
@@ -201,9 +207,11 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
 
                 <div className="mb-4">
                   <span className="text-3xl font-display font-extrabold text-white">
-                    {price === 0 ? 'Grátis' : `R$ ${price.toFixed(2)}`}
+                    {p.priceDiamonds === 0 ? 'Grátis' : formatDiamondsDisplay(p.priceDiamonds)}
                   </span>
-                  {price > 0 && <span className="text-xs text-slate-400"> /mês</span>}
+                  {p.priceDiamonds > 0 && (
+                    <span className="text-xs text-slate-400"> / {p.durationDays} dias</span>
+                  )}
                 </div>
 
                 <p className="text-xs text-slate-300 mb-6 leading-relaxed">
@@ -252,14 +260,22 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
             <div>
               <h3 className="font-display font-bold text-base text-white">
-                Checkout Seguro • Plano {currentPlan.name}
+                Ativação com Carteira de Diamantes • {currentPlan.name}
               </h3>
               <p className="text-xs text-slate-400">
-                Valor total: <strong>R$ {activePrice.toFixed(2)}</strong> ({period === 'monthly' ? 'Cobrança mensal' : 'Cobrança anual com desconto'})
+                Custo total: <strong>{formatDiamondsDisplay(currentPlan.priceDiamonds)}</strong> · Vigência:{' '}
+                <strong>{currentPlan.durationDays} dias</strong>
               </p>
             </div>
             <ShieldCheck className="w-6 h-6 text-emerald-400" />
           </div>
+
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-500/40 text-xs text-rose-200 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
 
           {checkoutSuccess ? (
             <div className="text-center py-6 space-y-3">
@@ -267,110 +283,33 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <h4 className="text-lg font-display font-bold text-white">
-                Assinatura Ativada com Sucesso!
+                Assinatura Ativada em Diamantes!
               </h4>
               <p className="text-xs text-slate-300">
-                Seu perfil foi atualizado para o nível <strong>{currentPlan.name}</strong>. Aproveite todos os benefícios exclusivos!
+                {receiptSummary ||
+                  `Seu perfil foi atualizado para o nível ${currentPlan.name} por ${currentPlan.durationDays} dias.`}
               </p>
             </div>
           ) : (
-            <>
-              {/* Payment Method Switcher */}
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('pix')}
-                  className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer ${
-                    paymentMethod === 'pix'
-                      ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300'
-                      : 'bg-[#151524] border-white/5 text-slate-400'
-                  }`}
-                >
-                  <QrCode className="w-4 h-4" />
-                  <span>Pix Instantâneo</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('card')}
-                  className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer ${
-                    paymentMethod === 'card'
-                      ? 'bg-rose-500/15 border-rose-500 text-rose-300'
-                      : 'bg-[#151524] border-white/5 text-slate-400'
-                  }`}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  <span>Cartão de Crédito</span>
-                </button>
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-2xl bg-black/40 border border-white/10 text-xs space-y-1.5 font-mono">
+                <div className="flex justify-between text-slate-300">
+                  <span>Plano selecionado:</span>
+                  <strong className="text-white">{currentPlan.name}</strong>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Período de acesso:</span>
+                  <strong className="text-white">{currentPlan.durationDays} dias</strong>
+                </div>
+                <div className="flex justify-between text-amber-300">
+                  <span>Débito na carteira:</span>
+                  <strong>{formatDiamondsDisplay(currentPlan.priceDiamonds)}</strong>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Saldo atual:</span>
+                  <span>{formatDiamondsDisplay(buyerWallet.totalAvailableDiamonds)}</span>
+                </div>
               </div>
-
-              {/* Pix Info */}
-              {paymentMethod === 'pix' && (
-                <div className="p-4 rounded-2xl bg-black/40 border border-emerald-500/30 text-center space-y-3">
-                  <div className="w-32 h-32 mx-auto bg-white p-2 rounded-xl flex items-center justify-center">
-                    {/* Simulated Pix QR graphic */}
-                    <div className="w-full h-full border-4 border-slate-900 grid grid-cols-4 gap-1 p-1">
-                      <div className="bg-slate-900 col-span-2 row-span-2" />
-                      <div className="bg-slate-900" />
-                      <div className="bg-slate-900" />
-                      <div className="bg-slate-900" />
-                      <div className="bg-slate-900 col-span-2 row-span-2" />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 max-w-sm mx-auto">
-                    <input
-                      type="text"
-                      readOnly
-                      value={simulatedPixCode}
-                      className="flex-1 bg-[#151524] border border-white/10 rounded-xl px-3 py-2 text-[10px] font-mono text-slate-400 truncate"
-                    />
-                    <button
-                      onClick={() => {
-                        navigator.clipboard?.writeText(simulatedPixCode);
-                        setCopiedPix(true);
-                        setTimeout(() => setCopiedPix(false), 2000);
-                      }}
-                      className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shrink-0"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>{copiedPix ? 'Copiado!' : 'Copiar'}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Card Form */}
-              {paymentMethod === 'card' && (
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <label className="block text-slate-400 mb-1">Número do Cartão</label>
-                    <input
-                      type="text"
-                      defaultValue="•••• •••• •••• 4242"
-                      className="w-full bg-[#151524] border border-white/10 rounded-xl px-3 py-2 text-white"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-400 mb-1">Validade</label>
-                      <input
-                        type="text"
-                        defaultValue="12/28"
-                        className="w-full bg-[#151524] border border-white/10 rounded-xl px-3 py-2 text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1">CVV</label>
-                      <input
-                        type="text"
-                        defaultValue="888"
-                        className="w-full bg-[#151524] border border-white/10 rounded-xl px-3 py-2 text-white"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
 
               <button
                 type="button"
@@ -382,12 +321,14 @@ export const Screen15Subscriptions: React.FC<Screen15SubscriptionsProps> = ({
                   <span>Processando ativação segura...</span>
                 ) : (
                   <>
-                    <span>Confirmar e Ativar {currentPlan.name} (R$ {activePrice.toFixed(2)})</span>
+                    <span>
+                      Confirmar e Ativar {currentPlan.name} ({formatDiamondsDisplay(currentPlan.priceDiamonds)})
+                    </span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
-            </>
+            </div>
           )}
         </div>
       )}

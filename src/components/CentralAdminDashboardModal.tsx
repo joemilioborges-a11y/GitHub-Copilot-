@@ -58,6 +58,8 @@ import { AdminActivityLog } from './admin/AdminActivityLog';
 import { MonthlyRecognitionAdminPanel } from './admin/MonthlyRecognitionAdminPanel';
 import { VrSimulatorControlPanel } from './admin/VrSimulatorControlPanel';
 import { RevenueAndEarningsReportPanel } from './admin/RevenueAndEarningsReportPanel';
+import { AdminRevenueSimulatorPanel } from './admin/AdminRevenueSimulatorPanel';
+import { LedgerSha256AuditViewer } from './admin/LedgerSha256AuditViewer';
 import { adminAuditService } from '../services/adminAuditService';
 import {
   vrSimulatorService,
@@ -95,10 +97,14 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
   const [feedbackToast, setFeedbackToast] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Sub-abas de visualização para integrar módulos especializados dentro dos 12 tópicos
-  const [walletSubTab, setWalletSubTab] = useState<'ledger' | 'executive_financial' | 'revenue_earnings_report'>('ledger');
+  const [walletSubTab, setWalletSubTab] = useState<
+    'ledger' | 'executive_financial' | 'revenue_earnings_report' | 'revenue_simulator'
+  >('ledger');
   const [contentsSubTab, setContentsSubTab] = useState<'catalog' | 'live_audit'>('catalog');
   const [creatorsSubTab, setCreatorsSubTab] = useState<'creators_ranking' | 'monthly_recognition' | 'creator_studio' | 'creators_list' | 'live_monitoring'>('creators_ranking');
-  const [securitySubTab, setSecuritySubTab] = useState<'admin_activity' | 'crypto_ledger' | 'events'>('admin_activity');
+  const [securitySubTab, setSecuritySubTab] = useState<
+    'admin_activity' | 'crypto_ledger' | 'sha256_audit_viewer' | 'events'
+  >('admin_activity');
 
   // Estados reativos dos dados reais do serviço
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -1216,18 +1222,32 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveSection('wallet');
-                      setWalletSubTab('revenue_earnings_report');
-                    }}
-                    data-testid="open-revenue-earnings-report-btn"
-                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <TrendingUp className="w-4 h-4" />
-                    Relatório de Receitas & Ganhos (70/30)
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSection('wallet');
+                        setWalletSubTab('revenue_simulator');
+                      }}
+                      data-testid="open-revenue-simulator-btn"
+                      className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Sliders className="w-4 h-4" />
+                      Simulador de Receita (70/20/10)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSection('wallet');
+                        setWalletSubTab('revenue_earnings_report');
+                      }}
+                      data-testid="open-revenue-earnings-report-btn"
+                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      Relatório de Receitas & Ganhos (70/30)
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1272,9 +1292,23 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                     <TrendingUp className="w-3.5 h-3.5" />
                     Relatório de Receitas & Ganhos (70/30)
                   </button>
+                  <button
+                    onClick={() => setWalletSubTab('revenue_simulator')}
+                    data-testid="wallet-subtab-revenue-simulator"
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      walletSubTab === 'revenue_simulator'
+                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                        : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800'
+                    }`}
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    Simulador Administrativo de Receita (70/20/10)
+                  </button>
                 </div>
 
-                {walletSubTab === 'revenue_earnings_report' ? (
+                {walletSubTab === 'revenue_simulator' ? (
+                  <AdminRevenueSimulatorPanel />
+                ) : walletSubTab === 'revenue_earnings_report' ? (
                   <RevenueAndEarningsReportPanel />
                 ) : walletSubTab === 'executive_financial' ? (
                   <PlatformFinancialExecutive />
@@ -2024,12 +2058,26 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                     <FileCheck2 className="w-3.5 h-3.5 text-amber-400" />
                     Relatório Criptográfico do Livro-Razão
                   </button>
+                  <button
+                    onClick={() => setSecuritySubTab('sha256_audit_viewer')}
+                    data-testid="tab-sha256-audit-viewer"
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                      securitySubTab === 'sha256_audit_viewer'
+                        ? 'bg-rose-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800'
+                    }`}
+                  >
+                    <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                    Visualizador de Logs SHA-256 (Baixo Nível)
+                  </button>
                 </div>
 
                 {securitySubTab === 'admin_activity' ? (
                   <AdminActivityLog onRefreshParent={doRefresh} />
                 ) : securitySubTab === 'crypto_ledger' ? (
                   <AuditLedgerReport onRefreshParent={doRefresh} />
+                ) : securitySubTab === 'sha256_audit_viewer' ? (
+                  <LedgerSha256AuditViewer operatorRole="admin" onRefreshParent={doRefresh} />
                 ) : (
                   <div className="space-y-4">
                     <div className="pb-3 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">

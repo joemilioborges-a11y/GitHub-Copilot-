@@ -351,10 +351,10 @@ export async function runLiveAndAuditVerificationSuite(): Promise<VerificationSu
         priceCreditsToUnlock: 0,
       });
 
-      // Envia presente "Champagne Moët & Chandon" = 50 créditos
-      // 50 créditos * R$ 0,10 = R$ 5,00
-      // 70% = R$ 3,50 para Criador
-      // 30% = R$ 1,50 para Plataforma
+      // Envia presente "Champagne Moët & Chandon" = 79 💎
+      // 79 💎 * R$ 0,10 = R$ 7,90
+      // 70% = R$ 5,53 para Criador
+      // 30% (20% JOBS + 10% Reserva) = R$ 2,37
       const idemKey = `idem_gift_7030_${Date.now()}`;
       const res = await liveStreamService.sendVirtualGift({
         sessionId: live.id,
@@ -366,17 +366,17 @@ export async function runLiveAndAuditVerificationSuite(): Promise<VerificationSu
       });
 
       if (!res.success) throw new Error('Falha no envio do presente');
-      if (res.creatorEarnedBrl !== 3.50) {
-        throw new Error(`Ganho do criador incorreto: esperado R$ 3,50, obtido R$ ${res.creatorEarnedBrl}`);
+      if (res.creatorEarnedBrl !== 5.53) {
+        throw new Error(`Ganho do criador incorreto: esperado R$ 5,53, obtido R$ ${res.creatorEarnedBrl}`);
       }
-      if (res.platformCommissionBrl !== 1.50) {
-        throw new Error(`Comissão da plataforma incorreta: esperado R$ 1,50, obtido R$ ${res.platformCommissionBrl}`);
+      if (res.platformCommissionBrl !== 2.37) {
+        throw new Error(`Comissão da plataforma incorreta: esperado R$ 2,37, obtido R$ ${res.platformCommissionBrl}`);
       }
 
       // Validação no livro-razão do saldo pendente do criador
       const creatorBalances = financialLedger.getCreatorBalances(testCreatorId);
-      if (creatorBalances.pendingBrl < 3.50) {
-        throw new Error(`Saldo pendente do criador no ledger deve ser >= R$ 3,50, atual: R$ ${creatorBalances.pendingBrl}`);
+      if (creatorBalances.pendingBrl < 5.53) {
+        throw new Error(`Saldo pendente do criador no ledger deve ser >= R$ 5,53, atual: R$ ${creatorBalances.pendingBrl}`);
       }
     }
   );

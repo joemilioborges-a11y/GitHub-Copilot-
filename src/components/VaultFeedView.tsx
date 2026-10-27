@@ -48,11 +48,11 @@ export const VaultFeedView: React.FC<VaultFeedViewProps> = ({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2 font-display">
-            <span>Cofre VIP Jhobs (+18)</span>
+            <span>Cofre VIP JOBS (+18)</span>
             <Sparkles className="w-5 h-5 text-amber-400" />
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Fotos e ensaios exclusivos desbloqueáveis com créditos. Conteúdo 100% consentido.
+            Acesso ao Cofre VIP por 149 💎 (30 dias, escopo por perfil) ou desbloqueio avulso (Foto 49 💎 · Vídeo 99 💎).
           </p>
         </div>
 
@@ -269,7 +269,7 @@ export const VaultFeedView: React.FC<VaultFeedViewProps> = ({
                     </div>
                     <span className="text-xs font-bold text-white mb-0.5">Clique para Desbloquear</span>
                     <span className="text-[10px] text-amber-300 font-mono">
-                      {media.priceCredits} Créditos Jhobs
+                      {media.priceCredits} 💎
                     </span>
                   </div>
                 )}
