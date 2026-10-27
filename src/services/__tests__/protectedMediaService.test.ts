@@ -1,7 +1,27 @@
 /**
  * JOBS — Suíte de Testes Obrigatórios de Proteção de Mídias, Fotos e Vídeos
- * Validação rigorosa dos controles da Fase 1 e Fase 2 da diretriz de segurança.
+ * Validação rigorosa dos controles da Fase 1, Fase 2 e Fase 3 da diretriz de segurança.
  */
+
+if (typeof globalThis.localStorage === 'undefined') {
+  const store: Record<string, string> = {};
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => (key in store ? store[key] : null),
+    setItem: (key: string, value: string) => {
+      store[key] = String(value);
+    },
+    removeItem: (key: string) => {
+      delete store[key];
+    },
+    clear: () => {
+      for (const k in store) delete store[k];
+    },
+    key: (index: number) => Object.keys(store)[index] || null,
+    get length() {
+      return Object.keys(store).length;
+    },
+  };
+}
 
 import { protectedMediaService, obfuscateUserIdForWatermark } from '../protectedMediaService';
 import { monetizationService } from '../monetizationService';
@@ -62,19 +82,22 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
   protectedMediaService.resetSecurityStorageForTesting();
 
   // =========================================================================
-  // TESTE 1: Usuário autorizado consegue visualizar a mídia protegida
+  // TESTE 1: Usuário autorizado consegue visualizar a mídia protegida com URL assinada
   // =========================================================================
   await runTest(
     1,
     'MEDIA_AUTH_01_AUTHORIZED_ACCESS',
-    'Usuário autorizado com concessão ativa recebe acesso e ticket com assinatura',
+    'Usuário autorizado com concessão ativa recebe acesso, ticket e URL temporária assinada',
     async () => {
       const userId = `user_auth_${Date.now()}`;
       const contentId = 'cnt_val_01';
       const masterUrl = '/src/assets/images/vip_exclusive_glamour_1791856838011.jpg';
 
       // Simular concessão ativa no monetizationService
-      const grants: ContentAccessGrant[] = (monetizationService as any).getItem('jobs_fase1_access_grants_v1', []);
+      const grants: ContentAccessGrant[] = (monetizationService as any).getItem(
+        'jobs_fase1_access_grants_v1',
+        []
+      );
       grants.push({
         id: `grnt_test_${Date.now()}`,
         contentId,
@@ -91,21 +114,32 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
         isContentFree: false,
       });
 
-      const passed = res.allowed === true && res.code === 'ACCESS_GRANTED' && Boolean(res.ticket?.signature);
+      const signedCheck = protectedMediaService.verifySignedDeliveryUrl({
+        deliveryUrl: res.deliveryUrl || '',
+        requestingUserId: userId,
+        expectedContentId: contentId,
+      });
+
+      const passed =
+        res.allowed === true &&
+        res.code === 'ACCESS_GRANTED' &&
+        Boolean(res.ticket?.signature) &&
+        signedCheck.allowed === true;
+
       return {
         passed,
-        evidence: `Acesso deferido: code=${res.code}, ticketId=${res.ticket?.ticketId}, assinatura=${res.ticket?.signature}.`,
+        evidence: `Acesso deferido: code=${res.code}, ticketId=${res.ticket?.ticketId}, assinatura=${res.ticket?.signature}, signedUrlValid=${signedCheck.allowed}.`,
       };
     }
   );
 
   // =========================================================================
-  // TESTE 2: Usuário não autorizado recebe acesso negado
+  // TESTE 2: Usuário não autorizado recebe acesso negado e teaser seguro sem URL master
   // =========================================================================
   await runTest(
     2,
     'MEDIA_AUTH_02_UNAUTHORIZED_DENIED',
-    'Usuário sem concessão ativa recebe acesso estritamente negado (sem vazamento da master)',
+    'Usuário sem concessão ativa recebe acesso negado e prévia isolada sem expor a URL master',
     async () => {
       const unauthUserId = `user_unauth_${Date.now()}`;
       const contentId = 'cnt_val_02';
@@ -118,32 +152,58 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
         isContentFree: false,
       });
 
-      const passed = res.allowed === false && res.code === 'ACCESS_DENIED_NO_GRANT' && res.isTeaserOnly === true;
+      const teaserUrl = protectedMediaService.getPublicTeaserUrl({
+        id: contentId,
+        mediaUrl: masterUrl,
+      });
+
+      const passed =
+        res.allowed === false &&
+        res.code === 'ACCESS_DENIED_NO_GRANT' &&
+        res.isTeaserOnly === true &&
+        res.deliveryUrl === undefined &&
+        teaserUrl.startsWith('data:image/svg+xml') &&
+        !teaserUrl.includes('vip_exclusive_glamour');
+
       return {
         passed,
-        evidence: `Acesso negado com segurança: code=${res.code}, motivo="${res.reason}". Teaser ativo.`,
+        evidence: `Acesso negado com segurança: code=${res.code}, deliveryUrl=${String(
+          res.deliveryUrl
+        )}, teaserDataUriIsolado=${teaserUrl.startsWith('data:image/svg+xml')}.`,
       };
     }
   );
 
   // =========================================================================
-  // TESTE 3: Acesso anônimo/sem autenticação é sumariamente bloqueado
+  // TESTE 3: Acesso direto à URL sem assinatura ou sem autenticação é bloqueado
   // =========================================================================
   await runTest(
     3,
-    'MEDIA_AUTH_03_ANONYMOUS_BLOCKED',
-    'Solicitação anônima sem userId é bloqueada no servidor de autorização',
+    'MEDIA_AUTH_03_DIRECT_URL_AND_ANONYMOUS_BLOCKED',
+    'Acesso direto ao arquivo sem assinatura e solicitação anônima sem userId são bloqueados',
     async () => {
-      const res = protectedMediaService.requestAuthorizedMediaAccess({
+      const masterUrl = '/src/assets/images/vip_exclusive_glamour_1791856838011.jpg';
+      const anonRes = protectedMediaService.requestAuthorizedMediaAccess({
         userId: '',
         contentId: 'cnt_val_01',
-        rawMasterUrl: '/src/assets/images/vip_exclusive_glamour_1791856838011.jpg',
+        rawMasterUrl: masterUrl,
       });
 
-      const passed = res.allowed === false && res.code === 'ACCESS_DENIED_UNAUTHENTICATED';
+      const directUrlRes = protectedMediaService.verifySignedDeliveryUrl({
+        deliveryUrl: masterUrl,
+        requestingUserId: 'user_direct_probe',
+        expectedContentId: 'cnt_val_01',
+      });
+
+      const passed =
+        anonRes.allowed === false &&
+        anonRes.code === 'ACCESS_DENIED_UNAUTHENTICATED' &&
+        directUrlRes.allowed === false &&
+        directUrlRes.code === 'ACCESS_DENIED_INVALID_SIGNATURE';
+
       return {
         passed,
-        evidence: `Bloqueio anônimo bem-sucedido: code=${res.code}, isTeaserOnly=${res.isTeaserOnly}.`,
+        evidence: `Bloqueio anônimo (${anonRes.code}) e bloqueio de URL direta sem assinatura (${directUrlRes.code}) confirmados.`,
       };
     }
   );
@@ -167,7 +227,6 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
         createdAt: new Date().toISOString(),
       };
 
-      // Tenta apresentar esse token para a mídia B
       const res = protectedMediaService.requestAuthorizedMediaAccess({
         userId,
         contentId: 'media_photo_02_DIFFERENT',
@@ -234,7 +293,7 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
         userId,
         accessGrantId: 'grnt_exp',
         tokenHash: 'hash_exp',
-        expiresAt: new Date(Date.now() - 1000).toISOString(), // Vencido há 1 segundo
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
         createdAt: new Date(Date.now() - 901000).toISOString(),
       };
 
@@ -298,7 +357,10 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
     'Usuário bloqueado por moderação perde o direito de visualizar qualquer mídia protegida',
     async () => {
       const blockedUser = `user_bad_actor_${Date.now()}`;
-      protectedMediaService.blockUserFromMedia(blockedUser, 'Violação reiterada das diretrizes de respeito.');
+      protectedMediaService.blockUserFromMedia(
+        blockedUser,
+        'Violação reiterada das diretrizes de respeito.'
+      );
 
       const res = protectedMediaService.requestAuthorizedMediaAccess({
         userId: blockedUser,
@@ -322,7 +384,10 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
     'MEDIA_AUTH_09_SAFE_WATERMARK_PAYLOAD',
     'Marca-d’água utiliza identificador anônimo de sessão sem expor e-mail, telefone ou CPF',
     () => {
-      const ticket = protectedMediaService.issueMediaTicket('joemilioborges@gmail.com', 'cnt_vip_photo');
+      const ticket = protectedMediaService.issueMediaTicket(
+        'joemilioborges@gmail.com',
+        'cnt_vip_photo'
+      );
       const obfuscated = obfuscateUserIdForWatermark('joemilioborges@gmail.com');
 
       const containsSensitive =
@@ -349,7 +414,10 @@ export async function runProtectedMediaTestSuite(): Promise<ProtectedMediaTestSu
       const logs = protectedMediaService.getSecurityAuditLogs();
       const hasLogs = logs.length > 0;
       const noSecrets = logs.every(
-        (l) => !l.reason.includes('jobs_media_secret_salt') && l.ipMasked.includes('***')
+        (l) =>
+          !l.reason.includes('jobs_media_secret_salt') &&
+          !l.actorId.includes('@') &&
+          l.ipMasked.includes('***')
       );
 
       const passed = hasLogs && noSecrets;
