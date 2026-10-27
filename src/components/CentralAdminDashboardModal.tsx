@@ -62,6 +62,10 @@ import { AdminRevenueSimulatorPanel } from './admin/AdminRevenueSimulatorPanel';
 import { LedgerSha256AuditViewer } from './admin/LedgerSha256AuditViewer';
 import { adminAuditService } from '../services/adminAuditService';
 import {
+  runtimeEnvironmentService,
+  RuntimeEnvironmentMode,
+} from '../services/runtimeEnvironmentService';
+import {
   vrSimulatorService,
   SimulationTopBannerStatus,
   VrSimulatorStateSnapshot,
@@ -106,11 +110,38 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
     'admin_activity' | 'crypto_ledger' | 'sha256_audit_viewer' | 'events'
   >('admin_activity');
 
-  // Estados reativos dos dados reais do serviço
+  // Estados reativos dos dados reais do serviço e do ambiente ativo
+  const [envMode, setEnvMode] = useState<RuntimeEnvironmentMode>(() =>
+    runtimeEnvironmentService.getMode()
+  );
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const doRefresh = () => setRefreshTrigger((prev) => prev + 1);
+  const envBannerInfo = useMemo(() => runtimeEnvironmentService.getBannerInfo(envMode), [envMode]);
 
-  const summary = useMemo(() => monetizationService.getAdminExecutiveSummary(), [refreshTrigger]);
+  useEffect(() => {
+    return runtimeEnvironmentService.subscribe((nextMode) => {
+      setEnvMode(nextMode);
+      doRefresh();
+    });
+  }, []);
+
+  const handleToggleRuntimeEnvironment = async (targetMode: RuntimeEnvironmentMode) => {
+    if (targetMode === envMode) return;
+    const res = await runtimeEnvironmentService.setMode(targetMode, {
+      userId: 'admin_master',
+      role: 'admin',
+      reason: `Alternância manual de ambiente pelo Painel Central do Administrador (${envMode} -> ${targetMode})`,
+    });
+    if (res.success) {
+      setEnvMode(res.currentMode);
+      doRefresh();
+      showToast(res.message, 'info');
+    } else {
+      showToast(res.message, 'error');
+    }
+  };
+
+  const summary = useMemo(() => monetizationService.getAdminExecutiveSummary(), [refreshTrigger, envMode]);
   const alerts = useMemo(() => monetizationService.getSecurityAndFinancialAlerts(), [refreshTrigger]);
   const purchases = useMemo(() => monetizationService.getPurchases(), [refreshTrigger]);
   const packages = useMemo(() => monetizationService.getPackages(false), [refreshTrigger]);
@@ -477,18 +508,54 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                 <h2 className="text-base font-extrabold text-white tracking-tight">
                   JOBS — Painel Central do Administrador
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                  FASE 1 · SANDBOX AUDITADO
+                <span
+                  data-testid="admin-runtime-env-badge"
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                    envBannerInfo.isSimulation
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}
+                >
+                  {envBannerInfo.badgeText}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Monitoramento consolidado de créditos, compras simuladas, desbloqueios e segurança
+                {envBannerInfo.bannerDescription}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+            {/* Chave Administrativa de Isolamento de Ambiente (Simulação vs Produção) */}
+            <div
+              data-testid="admin-env-mode-toggle"
+              className="flex items-center gap-1 p-1 rounded-xl bg-slate-900 border border-slate-700/80 text-[11px]"
+            >
+              <button
+                type="button"
+                onClick={() => handleToggleRuntimeEnvironment('simulation')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  envMode === 'simulation'
+                    ? 'bg-amber-500/25 text-amber-200 border border-amber-400/50'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Simulação (Sandbox)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleRuntimeEnvironment('production')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  envMode === 'production'
+                    ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/50'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Produção (Real)
+              </button>
+            </div>
+
+            <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-slate-300 font-medium">Modo Seguro:</span>
               <strong className="text-emerald-400">Nenhum Saque Real Ativo</strong>

@@ -281,6 +281,71 @@
         }
       },
       "required": ["probeId", "actorId", "status", "createdAt", "updatedAt"]
+    },
+    "ProtectedMediaItem": {
+      "title": "ProtectedMediaItem",
+      "description": "Metadata for creator photos, videos, and VIP Vault items with server/admin-enforced moderation status.",
+      "type": "object",
+      "properties": {
+        "mediaId": {
+          "type": "string",
+          "description": "Unique identifier of the media item.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorId": {
+          "type": "string",
+          "description": "UID of the creator who owns the media item.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": ["photo", "video"],
+          "description": "Type of media asset."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["free", "paid", "vip_vault"],
+          "description": "Access tier of the media asset."
+        },
+        "priceDiamonds": {
+          "type": "number",
+          "description": "Unlock price in integer diamonds (0, 49, or 99)."
+        },
+        "moderationStatus": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Moderation state. Creators can only set pending; only admins can set approved or rejected."
+        },
+        "title": {
+          "type": "string",
+          "description": "Optional media title.",
+          "maxLength": 140
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": [
+        "mediaId",
+        "creatorId",
+        "mediaType",
+        "visibility",
+        "priceDiamonds",
+        "moderationStatus",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -298,7 +363,11 @@
     },
     "/ledger_entries/{entryId}": {
       "schema": "LedgerSnapshot",
-      "description": "Immutable financial ledger entries."
+      "description": "Immutable financial ledger entries restricted to verified administrators on write."
+    },
+    "/media_items/{mediaId}": {
+      "schema": "ProtectedMediaItem",
+      "description": "Creator media metadata with anti-self-approval moderation enforcement."
     },
     "/test_audit/{docId}": {
       "schema": "TestAuditProbe",

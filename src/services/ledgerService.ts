@@ -10,6 +10,7 @@
  * - Identificação estrita de ambiente de testes (isSandbox: true).
  */
 import { adminAuditService } from './adminAuditService';
+import { runtimeEnvironmentService } from './runtimeEnvironmentService';
 import {
   buildOfficialLedgerRevenueReport,
   RevenueReportPeriodFilter,
@@ -411,23 +412,42 @@ class FinancialLedgerService {
     }
   }
 
-  // Obter todas as entradas do livro-razão
+  private getActiveLedgerKey(): string {
+    return runtimeEnvironmentService.getScopedStorageKey(STORAGE_KEY_LEDGER);
+  }
+
+  private getActiveAuditKey(): string {
+    return runtimeEnvironmentService.getScopedStorageKey(STORAGE_KEY_AUDIT);
+  }
+
+  // Obter todas as entradas do livro-razão respeitando o isolamento de ambiente
   public getEntries(): LedgerEntry[] {
-    const raw = getSafeStorage().getItem(STORAGE_KEY_LEDGER);
+    const key = this.getActiveLedgerKey();
+    const raw = getSafeStorage().getItem(key);
     if (!raw) {
-      const initial = this.seedInitialLedger();
-      return initial;
+      if (!runtimeEnvironmentService.shouldSeedSyntheticData()) {
+        return [];
+      }
+      return this.seedInitialLedger();
     }
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      if (!runtimeEnvironmentService.shouldSeedSyntheticData()) {
+        return parsed.filter((e: LedgerEntry) => !e.isSandbox);
+      }
+      return parsed;
     } catch {
+      if (!runtimeEnvironmentService.shouldSeedSyntheticData()) {
+        return [];
+      }
       return this.seedInitialLedger();
     }
   }
 
-  // Obter logs de auditoria
+  // Obter logs de auditoria respeitando o isolamento de ambiente
   public getAuditLogs(): LedgerAuditRecord[] {
-    const raw = getSafeStorage().getItem(STORAGE_KEY_AUDIT);
+    const raw = getSafeStorage().getItem(this.getActiveAuditKey());
     if (!raw) return [];
     try {
       return JSON.parse(raw);
@@ -437,7 +457,7 @@ class FinancialLedgerService {
   }
 
   private saveEntries(entries: LedgerEntry[]): void {
-    getSafeStorage().setItem(STORAGE_KEY_LEDGER, JSON.stringify(entries));
+    getSafeStorage().setItem(this.getActiveLedgerKey(), JSON.stringify(entries));
     this.notifySubscribers();
   }
 
@@ -449,13 +469,17 @@ class FinancialLedgerService {
       timestamp: new Date().toISOString(),
     };
     logs.unshift(newLog);
-    getSafeStorage().setItem(STORAGE_KEY_AUDIT, JSON.stringify(logs.slice(0, 500)));
+    getSafeStorage().setItem(this.getActiveAuditKey(), JSON.stringify(logs.slice(0, 500)));
   }
 
   /**
    * Inicializa o livro-razão com lançamento contábil de boas-vindas do ecossistema
+   * EXCLUSIVAMENTE no modo de simulação/sandbox. Em produção retorna lista vazia.
    */
   private seedInitialLedger(): LedgerEntry[] {
+    if (!runtimeEnvironmentService.shouldSeedSyntheticData()) {
+      return [];
+    }
     const genesisTime = '2026-10-18T00:00:00.000Z';
     const genesisEntry: LedgerEntry = {
       id: 'ledg_genesis_001',
@@ -465,6 +489,7 @@ class FinancialLedgerService {
       debitAccount: 'PLATFORM_RESERVE_POOL:credits',
       creditAccount: 'USER_CREDITS:current_user',
       amount: 150,
+      amountCents: 150,
       currency: 'CREDITS',
       status: 'posted',
       actorId: 'system_bootstrap',
@@ -481,39 +506,43 @@ class FinancialLedgerService {
 
   /**
    * Calcula o saldo de créditos utilizáveis de um usuário exclusivamente a partir
-   * das entradas confirmadas ('posted') do livro-razão.
+   * das entradas confirmadas ('posted' / 'refunded') do livro-razão em inteiros.
    */
   public getUserCredits(userId: string = 'current_user'): number {
     const entries = this.getEntries();
     const userAccount = `USER_CREDITS:${userId}`;
 
-    let credits = 0;
+    let creditsInt = 0;
     for (const entry of entries) {
       if (entry.currency !== 'CREDITS') continue;
       if (entry.status !== 'posted' && entry.status !== 'refunded') continue;
+      const units =
+        typeof entry.amountCents === 'number'
+          ? Math.round(entry.amountCents)
+          : Math.round(entry.amount);
       if (entry.creditAccount === userAccount) {
-        credits += entry.amount;
+        creditsInt += units;
       }
       if (entry.debitAccount === userAccount) {
-        credits -= entry.amount;
+        creditsInt -= units;
       }
     }
-    return Math.max(0, credits);
+    return Math.max(0, creditsInt);
   }
 
   /**
    * Calcula a composição contábil de ganhos de um Criador em BRL a partir do livro-razão.
-   * Totalmente segregado da conta de consumo do usuário.
+   * Utiliza aritmética inteira estrita em centavos (amountCents) para eliminar drift de ponto flutuante.
    */
   public getCreatorBalances(creatorId: string): CreatorBalanceSummary {
     const entries = this.getEntries();
     const creatorAccount = `CREATOR_PENDING_BRL:${creatorId}`;
     const creatorAvailAccount = `CREATOR_AVAILABLE_BRL:${creatorId}`;
 
-    let pendingBrl = 0;
-    let availableBrl = 0;
-    let totalEarnedBrl = 0;
-    let totalWithdrawnBrl = 0;
+    let pendingCents = 0;
+    let availableCents = 0;
+    let totalEarnedCents = 0;
+    let totalWithdrawnCents = 0;
     let unlockedContentsCount = 0;
     let tipsReceivedCount = 0;
 
@@ -521,51 +550,56 @@ class FinancialLedgerService {
       if (entry.currency !== 'BRL') continue;
       if (entry.status !== 'posted' && entry.status !== 'refunded') continue;
 
+      const entryCents =
+        typeof entry.amountCents === 'number'
+          ? Math.round(entry.amountCents)
+          : Math.round(entry.amount * 100);
+
       if (entry.creditAccount === creatorAccount || entry.creditAccount === creatorAvailAccount) {
-        totalEarnedBrl += entry.amount;
+        totalEarnedCents += entryCents;
         if (entry.status === 'posted' && entry.operationType === 'CONTENT_UNLOCK') unlockedContentsCount++;
         if (entry.status === 'posted' && entry.operationType === 'TIP_GIFT') tipsReceivedCount++;
       }
 
       if (entry.creditAccount === creatorAccount) {
-        pendingBrl += entry.amount;
+        pendingCents += entryCents;
       }
       if (entry.debitAccount === creatorAccount) {
-        pendingBrl -= entry.amount;
+        pendingCents -= entryCents;
         if (entry.operationType === 'REFUND' || entry.operationType === 'ADMIN_ADJUSTMENT') {
-          totalEarnedBrl -= entry.amount;
+          totalEarnedCents -= entryCents;
         }
       }
       if (entry.creditAccount === creatorAvailAccount) {
-        availableBrl += entry.amount;
+        availableCents += entryCents;
         if (entry.operationType === 'PAYOUT_REVERSAL') {
-          totalWithdrawnBrl -= entry.amount;
+          totalWithdrawnCents -= entryCents;
         }
       }
       if (entry.debitAccount === creatorAvailAccount) {
-        availableBrl -= entry.amount;
+        availableCents -= entryCents;
         if (entry.operationType === 'REFUND' || entry.operationType === 'ADMIN_ADJUSTMENT') {
-          totalEarnedBrl -= entry.amount;
+          totalEarnedCents -= entryCents;
         }
         if (entry.operationType === 'PAYOUT_RESERVE' || entry.operationType === 'PAYOUT_SETTLED') {
-          totalWithdrawnBrl += entry.amount;
+          totalWithdrawnCents += entryCents;
         }
       }
     }
 
     return {
       creatorId,
-      pendingBrl: Number(Math.max(0, pendingBrl).toFixed(2)),
-      availableBrl: Number(Math.max(0, availableBrl).toFixed(2)),
-      totalEarnedBrl: Number(Math.max(0, totalEarnedBrl).toFixed(2)),
-      totalWithdrawnBrl: Number(Math.max(0, totalWithdrawnBrl).toFixed(2)),
+      pendingBrl: Number((Math.max(0, pendingCents) / 100).toFixed(2)),
+      availableBrl: Number((Math.max(0, availableCents) / 100).toFixed(2)),
+      totalEarnedBrl: Number((Math.max(0, totalEarnedCents) / 100).toFixed(2)),
+      totalWithdrawnBrl: Number((Math.max(0, totalWithdrawnCents) / 100).toFixed(2)),
       unlockedContentsCount,
       tipsReceivedCount,
     };
   }
 
   /**
-   * Consolidação das Métricas Financeiras da Plataforma
+   * Consolidação das Métricas Financeiras da Plataforma em centavos inteiros
    */
   public getPlatformFinancialSummary(): {
     totalCreditsInCirculation: number;
@@ -576,39 +610,47 @@ class FinancialLedgerService {
     isSandboxAudited: boolean;
   } {
     const entries = this.getEntries();
-    let totalCredits = 0;
-    let totalEscrow = 0;
-    let totalRevenue = 0;
-    let totalCreatorLiabilities = 0;
+    let totalCreditsInt = 0;
+    let totalEscrowCents = 0;
+    let totalRevenueCents = 0;
+    let totalCreatorLiabilitiesCents = 0;
 
     for (const entry of entries) {
       if (entry.status !== 'posted' && entry.status !== 'refunded') continue;
       if (entry.currency === 'CREDITS') {
-        if (entry.creditAccount.startsWith('USER_CREDITS:')) totalCredits += entry.amount;
-        if (entry.debitAccount.startsWith('USER_CREDITS:')) totalCredits -= entry.amount;
+        const creditUnits =
+          typeof entry.amountCents === 'number'
+            ? Math.round(entry.amountCents)
+            : Math.round(entry.amount);
+        if (entry.creditAccount.startsWith('USER_CREDITS:')) totalCreditsInt += creditUnits;
+        if (entry.debitAccount.startsWith('USER_CREDITS:')) totalCreditsInt -= creditUnits;
       } else if (entry.currency === 'BRL') {
-        if (entry.creditAccount === 'ESCROW_PAYMENT_GATEWAY') totalEscrow += entry.amount;
-        if (entry.debitAccount === 'ESCROW_PAYMENT_GATEWAY') totalEscrow -= entry.amount;
+        const entryCents =
+          typeof entry.amountCents === 'number'
+            ? Math.round(entry.amountCents)
+            : Math.round(entry.amount * 100);
+        if (entry.creditAccount === 'ESCROW_PAYMENT_GATEWAY') totalEscrowCents += entryCents;
+        if (entry.debitAccount === 'ESCROW_PAYMENT_GATEWAY') totalEscrowCents -= entryCents;
 
-        if (entry.creditAccount === 'PLATFORM_REVENUE_BRL') totalRevenue += entry.amount;
-        if (entry.debitAccount === 'PLATFORM_REVENUE_BRL') totalRevenue -= entry.amount;
+        if (entry.creditAccount === 'PLATFORM_REVENUE_BRL') totalRevenueCents += entryCents;
+        if (entry.debitAccount === 'PLATFORM_REVENUE_BRL') totalRevenueCents -= entryCents;
 
         if (entry.creditAccount.startsWith('CREATOR_PENDING_BRL:') || entry.creditAccount.startsWith('CREATOR_AVAILABLE_BRL:')) {
-          totalCreatorLiabilities += entry.amount;
+          totalCreatorLiabilitiesCents += entryCents;
         }
         if (entry.debitAccount.startsWith('CREATOR_PENDING_BRL:') || entry.debitAccount.startsWith('CREATOR_AVAILABLE_BRL:')) {
-          totalCreatorLiabilities -= entry.amount;
+          totalCreatorLiabilitiesCents -= entryCents;
         }
       }
     }
 
     return {
-      totalCreditsInCirculation: Math.max(0, totalCredits),
-      totalFiatEscrowBrl: Number(Math.max(0, totalEscrow).toFixed(2)),
-      totalPlatformRevenueBrl: Number(Math.max(0, totalRevenue).toFixed(2)),
-      totalCreatorLiabilitiesBrl: Number(Math.max(0, totalCreatorLiabilities).toFixed(2)),
+      totalCreditsInCirculation: Math.max(0, totalCreditsInt),
+      totalFiatEscrowBrl: Number((Math.max(0, totalEscrowCents) / 100).toFixed(2)),
+      totalPlatformRevenueBrl: Number((Math.max(0, totalRevenueCents) / 100).toFixed(2)),
+      totalCreatorLiabilitiesBrl: Number((Math.max(0, totalCreatorLiabilitiesCents) / 100).toFixed(2)),
       totalTransactionsCount: entries.length,
-      isSandboxAudited: true,
+      isSandboxAudited: runtimeEnvironmentService.isSimulationMode(),
     };
   }
 
@@ -755,7 +797,7 @@ class FinancialLedgerService {
           targetCreatorId: item.targetCreatorId,
           referenceId: item.referenceId,
           description: item.description,
-          isSandbox: true,
+          isSandbox: runtimeEnvironmentService.isSimulationMode(),
           metadata: {
             ...item.metadata,
             batchIdempotencyKey: params.idempotencyKey,
@@ -789,7 +831,7 @@ class FinancialLedgerService {
         action: `TRANSACTION_COMMITTED:${transactionId}`,
         reason: params.description,
         ipHash: 'hash_sandbox_client_v4',
-        isSandbox: true,
+        isSandbox: runtimeEnvironmentService.isSimulationMode(),
         payload: {
           transactionId,
           idempotencyKey: params.idempotencyKey,
@@ -1290,8 +1332,10 @@ class FinancialLedgerService {
 
   /**
    * Garante a presença de entradas iniciais de lives no livro-razão se estiver apenas com genesis.
+   * Estritamente desativado quando o ambiente ativo for 'production'.
    */
   public ensureInitialLiveAuditEntries(): void {
+    if (!runtimeEnvironmentService.shouldSeedSyntheticData()) return;
     const entries = this.getEntries();
     const hasLiveOrUnlock = entries.some(
       (e) =>
@@ -1876,14 +1920,22 @@ class FinancialLedgerService {
   }
 
   /**
-   * REEMBOLSO / ESTORNO AUDITADO (Compensatory Reversing Entry)
+   * REEMBOLSO / ESTORNO AUDITADO ATÔMICO MULTI-PERNAS (Compensatory Reversing Bundle)
+   * Reverte a entrada original e todas as pernas irmãs vinculadas ao mesmo transactionId
+   * (ex: spend + creator_share 70% + platform_share 30%) em um único lote atômico idempotente.
    */
   public async processRefund(params: {
     originalEntryId: string;
     reason: string;
     adminId: string;
     idempotencyKey: string;
-  }): Promise<{ success: boolean; compensatoryEntry: LedgerEntry }> {
+    includeSiblingLegs?: boolean;
+  }): Promise<{
+    success: boolean;
+    compensatoryEntry: LedgerEntry;
+    allCompensatoryEntries: LedgerEntry[];
+    reversedLegsCount: number;
+  }> {
     const entries = this.getEntries();
     const original = entries.find((e) => e.id === params.originalEntryId);
 
@@ -1895,35 +1947,101 @@ class FinancialLedgerService {
       throw new Error(`Esta transação já foi estornada anteriormente.`);
     }
 
-    // Inverter as contas para anular o efeito contábil
-    const res = await this.postEntry({
-      idempotencyKey: params.idempotencyKey,
-      operationType: 'REFUND',
-      debitAccount: original.creditAccount,
-      creditAccount: original.debitAccount,
-      amount: original.amount,
-      currency: original.currency,
-      actorId: params.adminId,
-      referenceId: original.id,
-      description: `[ESTORNO AUDITADO] Motivo: ${params.reason} (Ref: ${original.id})`,
+    const shouldReverseSiblings = params.includeSiblingLegs !== false;
+    const siblingLegs =
+      shouldReverseSiblings && original.transactionId
+        ? entries.filter(
+            (e) =>
+              e.transactionId === original.transactionId &&
+              e.id !== original.id &&
+              e.status === 'posted' &&
+              e.operationType !== 'REFUND'
+          )
+        : [];
+
+    const legsToReverse = [original, ...siblingLegs];
+    const refundTransactionId = `tx_refund_${original.transactionId || original.id}`;
+
+    const draftEntries = legsToReverse.map((leg, idx) => ({
+      idempotencySuffix: idx === 0 ? 'primary' : `leg_${idx}`,
+      operationType: 'REFUND' as LedgerOperationType,
+      debitAccount: leg.creditAccount,
+      creditAccount: leg.debitAccount,
+      amount: leg.amount,
+      amountCents: leg.amountCents,
+      currency: leg.currency,
+      targetCreatorId: leg.targetCreatorId,
+      referenceId: leg.id,
+      description: `[ESTORNO AUDITADO] Motivo: ${params.reason} (Ref: ${leg.id})`,
       metadata: {
-        originalEntryId: original.id,
+        originalEntryId: leg.id,
+        originalTransactionId: leg.transactionId || null,
+        originalOperationType: leg.operationType,
         reason: params.reason,
+        isAtomicMultiLegRefund: legsToReverse.length > 1,
       },
+    }));
+
+    const res = await this.postTransactionAtomic({
+      transactionId: refundTransactionId,
+      idempotencyKey: params.idempotencyKey,
+      description: `[ESTORNO ATÔMICO] Motivo: ${params.reason} (Ref: ${original.id})`,
+      actorId: params.adminId,
+      entries: draftEntries,
     });
 
-    // Marcar original como estornada
+    // Marcar todas as pernas originais revertidas como estornadas
     const current = this.getEntries();
-    const target = current.find((e) => e.id === original.id);
-    if (target) {
-      target.status = 'refunded';
+    const reversedIds = new Set(legsToReverse.map((l) => l.id));
+    let mutated = false;
+    for (const entry of current) {
+      if (reversedIds.has(entry.id) && entry.status !== 'refunded') {
+        entry.status = 'refunded';
+        mutated = true;
+      }
+    }
+    if (mutated) {
       this.saveEntries(current);
     }
 
     return {
       success: true,
-      compensatoryEntry: res.entry,
+      compensatoryEntry: res.entries[0],
+      allCompensatoryEntries: res.entries,
+      reversedLegsCount: res.entries.length,
     };
+  }
+
+  /**
+   * Estorno atômico explícito por transactionId completo
+   */
+  public async processTransactionRefundAtomic(params: {
+    transactionId: string;
+    reason: string;
+    adminId: string;
+    idempotencyKey: string;
+  }): Promise<{
+    success: boolean;
+    compensatoryEntry: LedgerEntry;
+    allCompensatoryEntries: LedgerEntry[];
+    reversedLegsCount: number;
+  }> {
+    const entries = this.getEntries();
+    const txLegs = entries.filter(
+      (e) => e.transactionId === params.transactionId && e.operationType !== 'REFUND'
+    );
+    if (txLegs.length === 0) {
+      throw new Error(`Transação não encontrada no livro-razão: ${params.transactionId}`);
+    }
+    const primaryLeg =
+      txLegs.find((e) => e.currency === 'CREDITS') || txLegs[0];
+    return this.processRefund({
+      originalEntryId: primaryLeg.id,
+      reason: params.reason,
+      adminId: params.adminId,
+      idempotencyKey: params.idempotencyKey,
+      includeSiblingLegs: true,
+    });
   }
 
   /**

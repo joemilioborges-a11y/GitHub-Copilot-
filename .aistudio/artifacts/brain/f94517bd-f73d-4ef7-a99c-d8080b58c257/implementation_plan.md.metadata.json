@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano incremental de implementação para publicação de fotos e vídeos no perfil (Gratuito, Desbloqueio Individual e Cofre VIP), gestão do Cofre VIP, confirmação pré-compra em diamantes (💎), abas organizadas no perfil e testes automatizados de integridade financeira.",
-  "updatedAt":  "2026-10-27T15:24:34.990407227Z",
+  "summary":  "Plano incremental de auditoria, endurecimento contábil (ledgerService), correção de regras do Firestore, isolamento estrito entre Simulação (localStorage) e Produção (Firestore) e checklist de prontidão do JOBS.",
+  "updatedAt":  "2026-10-27T17:32:04.055446287Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

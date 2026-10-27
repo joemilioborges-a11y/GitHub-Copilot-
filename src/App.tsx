@@ -50,6 +50,7 @@ import { Screen18ReportsBlocks } from './components/screens/Screen18ReportsBlock
 import { LiveStreamView } from './components/LiveStreamView';
 import { authService } from './utils/authService';
 import { financialLedger } from './services/ledgerService';
+import { runtimeEnvironmentService } from './services/runtimeEnvironmentService';
 import { matchAndMessagingService } from './services/matchAndMessagingService';
 import { exclusiveContentAndInterestService } from './services/exclusiveContentAndInterestService';
 
@@ -242,9 +243,23 @@ export default function App() {
     initGoogleAnalytics();
     trackPageView(activeScreen);
     const currentUid = authService.getCurrentSession()?.userId || 'user_emilio_vip';
-    matchAndMessagingService.seedInitialTestMatch(currentUid, 'valentina');
-    matchAndMessagingService.recordLike('isabella', currentUid, 'standard');
+    if (runtimeEnvironmentService.shouldSeedSyntheticData()) {
+      matchAndMessagingService.seedInitialTestMatch(currentUid, 'valentina');
+      matchAndMessagingService.recordLike('isabella', currentUid, 'standard');
+    }
   }, [activeScreen]);
+
+  useEffect(() => {
+    const syncCredits = () => {
+      setUserCredits(financialLedger.getUserCredits('current_user'));
+    };
+    const unsubLedger = financialLedger.subscribe(syncCredits);
+    const unsubEnv = runtimeEnvironmentService.subscribe(syncCredits);
+    return () => {
+      unsubLedger();
+      unsubEnv();
+    };
+  }, []);
 
   // Filter unblocked profiles
   const visibleProfiles = profiles.filter((p) => !blockedUserIds.includes(p.id));

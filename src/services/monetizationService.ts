@@ -45,6 +45,7 @@ import {
   WithdrawalSimulationRecord,
 } from '../types';
 import { financialLedger } from './ledgerService';
+import { runtimeEnvironmentService } from './runtimeEnvironmentService';
 
 const STORAGE_KEY_ADMIN_WITHDRAWALS = 'jobs_admin_withdrawal_records_v2';
 const STORAGE_KEY_REMUNERATION_POLICY = 'jobs_remuneration_policy_v1';
@@ -95,7 +96,8 @@ class MonetizationDomainService {
   // ==========================================================================
 
   private getItem<T>(key: string, defaultValue: T): T {
-    const raw = localStorage.getItem(key);
+    const scopedKey = runtimeEnvironmentService.getScopedStorageKey(key);
+    const raw = localStorage.getItem(scopedKey);
     if (!raw) return defaultValue;
     try {
       return JSON.parse(raw);
@@ -105,7 +107,8 @@ class MonetizationDomainService {
   }
 
   private setItem<T>(key: string, value: T): void {
-    localStorage.setItem(key, JSON.stringify(value));
+    const scopedKey = runtimeEnvironmentService.getScopedStorageKey(key);
+    localStorage.setItem(scopedKey, JSON.stringify(value));
   }
 
   // Pacotes oficiais configuráveis
@@ -226,11 +229,13 @@ class MonetizationDomainService {
       return wallets[userId];
     }
 
-    // Inicialização da carteira
+    const initialBalance = runtimeEnvironmentService.shouldSeedSyntheticData() ? 150 : 0;
+
+    // Inicialização da carteira (150 créditos apenas em simulação; 0 em produção)
     const newWallet: CreditWallet = {
       id: `wallet_${userId}`,
       userId,
-      balance: 150, // 150 créditos de boas-vindas do ambiente de testes
+      balance: initialBalance,
       currencyType: 'virtual_credits_non_withdrawable',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

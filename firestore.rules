@@ -158,6 +158,48 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidMediaItem(data, mediaId) {
+      let requiredKeys = [
+        'mediaId',
+        'creatorId',
+        'mediaType',
+        'visibility',
+        'priceDiamonds',
+        'moderationStatus',
+        'createdAt',
+        'updatedAt'
+      ];
+      let allowedKeys = [
+        'mediaId',
+        'creatorId',
+        'mediaType',
+        'visibility',
+        'priceDiamonds',
+        'moderationStatus',
+        'title',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(allowedKeys)
+        && data.mediaId is string
+        && data.mediaId == mediaId
+        && data.mediaId.size() >= 1 && data.mediaId.size() <= 128
+        && data.creatorId is string
+        && data.creatorId.size() >= 1 && data.creatorId.size() <= 128
+        && data.mediaType is string
+        && (data.mediaType == 'photo' || data.mediaType == 'video')
+        && data.visibility is string
+        && (data.visibility == 'free' || data.visibility == 'paid' || data.visibility == 'vip_vault')
+        && data.priceDiamonds is int
+        && (data.priceDiamonds == 0 || data.priceDiamonds == 49 || data.priceDiamonds == 99)
+        && data.moderationStatus is string
+        && (data.moderationStatus == 'pending' || data.moderationStatus == 'approved' || data.moderationStatus == 'rejected')
+        && (!('title' in data) || (data.title is string && data.title.size() <= 140))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // ============================================================================
     // Admin RBAC Directory
     // ============================================================================
@@ -220,11 +262,46 @@ service cloud.firestore {
 
     // ============================================================================
     // Immutable Financial Ledger Snapshots
+    // Direct client writes by non-admin users are strictly forbidden.
     // ============================================================================
     match /ledger_entries/{entryId} {
       allow get, list: if isAdmin() || (isSignedIn() && resource.data.actorId == request.auth.uid);
-      allow create: if (isAdmin() || isSignedIn()) && isValidLedgerSnapshot(request.resource.data, entryId);
+      allow create: if isAdmin() && isValidLedgerSnapshot(request.resource.data, entryId);
       allow update, delete: if false;
+    }
+
+    // ============================================================================
+    // Creator Media Items (Anti-Self-Approval Moderation Gate)
+    // Creators can only create or update with moderationStatus == 'pending'.
+    // Only verified administrators can set moderationStatus to 'approved' or 'rejected'.
+    // ============================================================================
+    match /media_items/{mediaId} {
+      allow get, list: if isAdmin()
+        || (isSignedIn() && resource.data.creatorId == request.auth.uid)
+        || (isSignedIn() && resource.data.moderationStatus == 'approved');
+      allow create: if isValidMediaItem(request.resource.data, mediaId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(request.resource.data.creatorId)
+            && request.resource.data.moderationStatus == 'pending'
+          )
+        );
+      allow update: if isValidMediaItem(request.resource.data, mediaId)
+        && request.resource.data.mediaId == resource.data.mediaId
+        && request.resource.data.creatorId == resource.data.creatorId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(resource.data.creatorId)
+            && request.resource.data.moderationStatus == 'pending'
+          )
+        );
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
     }
 
     // ============================================================================

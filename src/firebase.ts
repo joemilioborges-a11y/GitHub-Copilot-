@@ -243,3 +243,49 @@ export function subscribeToCloudAuditLogs(
     }
   );
 }
+
+/**
+ * Persists an immutable LedgerSnapshot to Firestore (/ledger_entries/{entryId})
+ * Restricted by Firestore Security Rules to verified administrators (isAdmin()).
+ */
+export async function syncLedgerEntrySnapshotToFirestore(entry: {
+  entryId: string;
+  actorId: string;
+  operationType: string;
+  debitAccount: string;
+  creditAccount: string;
+  amountCents: number;
+  currency: 'BRL' | 'CREDITS';
+  status: 'posted' | 'pending' | 'voided' | 'refunded';
+  entryHash: string;
+  previousHash: string;
+}): Promise<boolean> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    return false;
+  }
+
+  const safeEntryId = entry.entryId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const path = `ledger_entries/${safeEntryId}`;
+
+  try {
+    const docRef = doc(db, 'ledger_entries', safeEntryId);
+    await setDoc(docRef, {
+      entryId: safeEntryId,
+      actorId: currentUser.uid,
+      operationType: entry.operationType.slice(0, 64),
+      debitAccount: entry.debitAccount.slice(0, 128),
+      creditAccount: entry.creditAccount.slice(0, 128),
+      amountCents: Math.max(1, Math.min(100000000, Math.round(entry.amountCents))),
+      currency: entry.currency,
+      status: entry.status,
+      entryHash: entry.entryHash.slice(0, 128),
+      previousHash: entry.previousHash.slice(0, 128),
+      createdAt: serverTimestamp(),
+    });
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+

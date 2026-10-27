@@ -442,6 +442,24 @@ async function main() {
     }
   }
 
+  console.log('\n========================================================================');
+  console.log('JOBS — 6 TESTES OBRIGATÓRIOS: PRONTIDÃO PARA PRODUÇÃO, ISOLAMENTO & SEGURANÇA');
+  console.log('========================================================================\n');
+
+  const { runProductionReadinessAndIsolationTestSuite } = await import(
+    '../src/services/__tests__/productionReadinessAndIsolation.test'
+  );
+  const prodReadinessSummary = await runProductionReadinessAndIsolationTestSuite();
+
+  for (const t of prodReadinessSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Teste ${t.testNumber} [${t.id}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO DETALHADO: ${t.error}`);
+    }
+  }
+
   const grandTotal =
     summary.totalTests +
     withdrawalSummary.total +
@@ -466,7 +484,8 @@ async function main() {
     revSimSummary.total +
     sha256AuditSummary.total +
     proximitySummary.total +
-    creatorContentSummary.total;
+    creatorContentSummary.total +
+    prodReadinessSummary.total;
   const grandPassed =
     summary.passedCount +
     withdrawalSummary.passed +
@@ -491,7 +510,8 @@ async function main() {
     revSimSummary.passed +
     sha256AuditSummary.passed +
     proximitySummary.passed +
-    creatorContentSummary.passed;
+    creatorContentSummary.passed +
+    prodReadinessSummary.passed;
   const grandFailed =
     summary.failedCount +
     withdrawalSummary.failed +
@@ -516,7 +536,8 @@ async function main() {
     revSimSummary.failed +
     sha256AuditSummary.failed +
     proximitySummary.failed +
-    creatorContentSummary.failed;
+    creatorContentSummary.failed +
+    prodReadinessSummary.failed;
 
   console.log('\n========================================================================');
   console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
@@ -537,7 +558,8 @@ async function main() {
       revSimSummary.durationMs +
       sha256AuditSummary.durationMs +
       proximitySummary.durationMs +
-      creatorContentSummary.durationMs
+      creatorContentSummary.durationMs +
+      prodReadinessSummary.durationMs
     }ms`
   );
   console.log('========================================================================\n');

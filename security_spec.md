@@ -7,7 +7,8 @@
 | `/users/{userId}` | `UserPublicProfile` | Public Only (`uid`, `displayName`, `handle`, `avatarUrl`, `bio`, `createdAt`, `updatedAt`) | Signed-in read; owner create/update; owner or admin delete |
 | `/users/{userId}/private/{docId}` | `UserPrivateInfo` | Private PII (`uid`, `email`, `createdAt`, `updatedAt`) | Owner or Admin read/write only (`docId == 'profile'`) |
 | `/admin_audit_logs/{eventId}` | `AdminAuditRecord` | Administrative Audit Trail | Verified Admin read & append-only create; **Immutable** (`update: false`, `delete: false`) |
-| `/ledger_entries/{entryId}` | `LedgerSnapshot` | Double-Entry Financial Ledger | Verified Admin or Actor read; Verified Admin or Actor append-only create; **Immutable** (`update: false`, `delete: false`) |
+| `/ledger_entries/{entryId}` | `LedgerSnapshot` | Double-Entry Financial Ledger | Verified Admin or Actor read; **Verified Admin ONLY** append-only create; **Immutable** (`update: false`, `delete: false`) |
+| `/media_items/{mediaId}` | `ProtectedMediaItem` | Creator Content Metadata | Approved read or Owner/Admin read; Creator create/update forced to `moderationStatus == 'pending'`; Admin only can set `'approved'`/`'rejected'` |
 | `/admins/{adminId}` | Admin Role Marker | System RBAC | Admin read/write only |
 
 ## 2. Core Data Invariants
