@@ -60,6 +60,7 @@ import { VrSimulatorControlPanel } from './admin/VrSimulatorControlPanel';
 import { RevenueAndEarningsReportPanel } from './admin/RevenueAndEarningsReportPanel';
 import { AdminRevenueSimulatorPanel } from './admin/AdminRevenueSimulatorPanel';
 import { LedgerSha256AuditViewer } from './admin/LedgerSha256AuditViewer';
+import { TalentProgressAdminAuditPanel } from './admin/TalentProgressAdminAuditPanel';
 import { adminAuditService } from '../services/adminAuditService';
 import {
   runtimeEnvironmentService,
@@ -105,7 +106,14 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
     'ledger' | 'executive_financial' | 'revenue_earnings_report' | 'revenue_simulator'
   >('ledger');
   const [contentsSubTab, setContentsSubTab] = useState<'catalog' | 'live_audit'>('catalog');
-  const [creatorsSubTab, setCreatorsSubTab] = useState<'creators_ranking' | 'monthly_recognition' | 'creator_studio' | 'creators_list' | 'live_monitoring'>('creators_ranking');
+  const [creatorsSubTab, setCreatorsSubTab] = useState<
+    | 'creators_ranking'
+    | 'monthly_recognition'
+    | 'creator_studio'
+    | 'creators_list'
+    | 'live_monitoring'
+    | 'talent_progress_audit'
+  >('creators_ranking');
   const [securitySubTab, setSecuritySubTab] = useState<
     'admin_activity' | 'crypto_ledger' | 'sha256_audit_viewer' | 'events'
   >('admin_activity');
@@ -1981,6 +1989,19 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                     <Radio className="w-3.5 h-3.5 text-rose-400" />
                     <span>Monitoramento de Lives</span>
                   </button>
+
+                  <button
+                    onClick={() => setCreatorsSubTab('talent_progress_audit')}
+                    data-testid="tab-talent-progress-audit"
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                      creatorsSubTab === 'talent_progress_audit'
+                        ? 'bg-rose-600 text-white shadow-md shadow-rose-950/50'
+                        : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Auditoria Talentos (/talent_progress)</span>
+                  </button>
                 </div>
 
                 {creatorsSubTab === 'creators_ranking' ? (
@@ -1991,6 +2012,8 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                   <JobsCreatorStudio />
                 ) : creatorsSubTab === 'live_monitoring' ? (
                   <LiveStreamsAdminMonitoring />
+                ) : creatorsSubTab === 'talent_progress_audit' ? (
+                  <TalentProgressAdminAuditPanel onRefreshParent={doRefresh} />
                 ) : (
                   <div className="space-y-4">
                     <div className="pb-3 border-b border-slate-800">

@@ -1,130 +1,123 @@
-# Evolução da Auditoria em Nuvem de Talentos e Painel Administrativo de Snapshots
+# JOBS — Evolução Auditada da Seção “Minha Carteira” na Tela Inicial
 
-Este plano detalha a evolução incremental da sincronização de progresso auditado de talentos com o Cloud Firestore durante transições de autenticação em produção e a adição de um painel administrativo de inspeção de snapshots de campanhas sazonais na seção de Criadores.
+Consolidação incremental do cartão **“Minha Carteira”** imediatamente abaixo do banner de boas-vindas da tela inicial, conectado como projeção somente leitura ao livro-razão contábil de partidas dobradas (`financialLedger`), exibindo **Saldo disponível**, **Saldo pendente**, **Total recebido**, **Última movimentação**, **Ver extrato** e **Solicitar saque** com validação de elegibilidade, idempotência e bloqueio de acesso entre usuários.
 
----
+### User Review & Critical Decisions
 
-## User Review & Critical Decisions
+> [!IMPORTANT]
+> As decisões abaixo foram alinhadas na etapa de esclarecimento e governam o comportamento contábil, visual e de segurança desta entrega:
 
-As diretrizes de produto e arquitetura confirmadas para esta etapa são:
-
-- **Reconciliação Automática de Snapshots Locais ao Autenticar**: Quando o participante opera em **Modo Produção** sem sessão ativa no Firebase Auth, o snapshot de progresso validado permanece em estado de auditoria local (`synced_local_audit`). Assim que `onAuthStateChanged` detecta uma sessão autenticada, o sistema reconcilia e grava automaticamente os snapshots locais pendentes na coleção protegida de progresso de talentos do usuário autenticado, além de disponibilizar um botão direto de autenticação Google na barra de status de produção.
-- **Painel Administrativo de Auditoria Integrado em Criadores**: O painel administrativo central passa a contar com uma aba dedicada dentro da seção **Criadores** para auditar os snapshots de progresso de talentos (`talent_progress`), oferecendo busca textual por identificador ou perfil, filtros combinados (perspectiva de atuação, nível gamificado, metas concluídas e origem Nuvem vs. Auditoria Local) e um inspetor de payload JSON canônico.
-- **Isolamento Contábil e de Ambiente Inalterado**: Nenhuma operação de gamificação ou sincronização de progresso gera lançamentos no livro-razão financeiro (`ledger_entries`), e o **Modo Simulação** permanece estritamente bloqueado contra gravações remotas no Firestore.
-
----
-
-## 1. Overview & Core Concept
-
-A seção **"Seu talento vale muito!"** já apura os 5 desafios obrigatórios a partir dos contadores reais da plataforma quando em Modo Produção e valida cada snapshot contra regras estritas de esquema. No entanto, dois pontos operacionais exigiam evolução:
-
-1. **Continuidade entre Sessão Visitante e Sessão Autenticada**: Como as regras de segurança do banco de dados exigem que o documento pertença ao próprio usuário autenticado (`isOwner`) ou a um administrador verificado (`isAdmin`), um participante que acumula atividade auditada antes de fazer login ficava retido em `synced_local_audit` até acionar manualmente uma nova sincronização após autenticar-se.
-2. **Visibilidade Administrativa para Campanhas Sazonais**: Administradores verificados necessitam de uma visão consolidada para inspecionar os snapshots de progresso dos criadores e colaboradores, verificar a integridade dos contadores de mídias aprovadas, conexões, transmissões ao vivo e dias ativos, e auditar o documento bruto sem depender de consultas externas ao console do banco.
+- **Decisão Confirmada 1 — Comportamento do botão “Solicitar saque” abaixo do mínimo (R$ 50,00)**: O botão permanece acessível para transparência operacional; quando o saldo disponível for inferior a R$ 50,00 (`5000` centavos) ou faltar requisito de elegibilidade, o modal exibe claramente os critérios pendentes (valor mínimo, limite diário, titularidade PIX e saldo atual) e mantém a submissão bloqueada no cliente e no motor contábil.
+- **Decisão Confirmada 2 — Escopo do modal “Ver extrato” (BRL vs. Créditos)**: O extrato da Minha Carteira apresenta de forma dedicada as movimentações financeiras em Reais (`BRL`) — diferenciando entradas de colaboradores, repasses 70% de produtores de conteúdo, solicitações de saque (`PAYOUT_RESERVE`), liquidações (`PAYOUT_SETTLED`), estornos (`REFUND` / `PAYOUT_REVERSAL`) e ajustes (`ADMIN_ADJUSTMENT`) — e oferece um atalho integrado para abrir o extrato específico de Créditos de Consumo (`💎`), preservando a segregação contábil.
+- **Decisão Confirmada 3 — Controle de Autorização e Isolamento de Usuário**: Todas as leituras de resumo, consultas de extrato e solicitações de saque validam a identidade da sessão autenticada (`actorId` / `userId` autorizado), bloqueando e auditando qualquer tentativa de consulta ou saque sobre a carteira de terceiros.
 
 ---
 
-## 2. User Experience & Visual Design
+### 1. Overview & Core Concept
 
-A interface segue a estética escura de alta precisão do JOBS, com tipografia tabular (`tabular-nums`) para todos os contadores de auditoria, separação semântica clara entre estados de sincronização e hierarquia visual de elevação única.
-
-### A. Controles de Autenticação e Reconciliação na Seção de Talentos (Modo Produção)
-- **Indicador de Sessão e Nuvem**: No cabeçalho da seção de talentos, quando em Modo Produção:
-  - Se o participante **não estiver autenticado** no Firebase Auth e o snapshot estiver em `synced_local_audit`, exibe a indicação de auditoria local validada acompanhada de uma ação direta **"Entrar com Google para salvar na nuvem"**.
-  - Ao concluir a autenticação, um observador reativo dispara imediatamente a reconciliação da fila local para a coleção remota, atualizando o estado visual para **Sincronizado no Firestore** com o horário exato da auditoria e o identificador truncado da sessão ativa.
-  - Em ambientes de teste ou janelas restritas onde o popup OAuth possa ser bloqueado pelo navegador, o sistema preserva o snapshot local intacto e exibe diagnóstico claro sem perda de estado.
-
-### B. Aba de Auditoria de Progresso de Talentos em Criadores (Painel Central Admin)
-- **Navegação Contextual**: Integrada como sub-aba na seção **7. Criadores** do Painel Central do Administrador.
-- **Resumo Executivo de Auditoria (KPI Strip)**:
-  - Total de snapshots auditados disponíveis (Nuvem Firestore + Auditoria Local da sessão).
-  - Quantidade de participantes com todas as 5 metas concluídas no ciclo.
-  - Pontuação gamificada média (claramente rotulada como pontuação não monetária).
-  - Status da assinatura em tempo real com o banco de dados (`Ativa · Admin Verificado` ou `Leitura Local · Requer Admin Autenticado`).
-- **Barra de Busca e Filtros Combinados**:
-  - Campo de busca instantânea por `userId` ou categoria de perfil.
-  - Filtro por perspectiva: **Todos**, **Produtor de Conteúdo** ou **Colaborador**.
-  - Filtro por origem do registro: **Todos**, **Firestore (Nuvem)** ou **Auditoria Local**.
-  - Filtro por faixa de conclusão de metas: **Todas**, **Ciclo Completo (5/5)**, **Em Andamento (1–4/5)** ou **Iniciante (0/5)**.
-- **Grade de Dados de Alta Densidade & Inspetor JSON**:
-  - Tabela com alinhamento numérico tabular exibindo: Participante (`userId`), Perspectiva, Nível Gamificado, Metas Concluídas (`0 de 5` a `5 de 5`), Contadores Auditados (Mídias, Ações Colab, Interações, Lives, Dias Ativos, Engajamento), Pontos (`Pts`), Origem/Status e Horário da última atualização.
-  - Ação **"Inspecionar JSON"** em cada linha, abrindo um painel lateral ou gaveta expansível que exibe o payload canônico validado contra o esquema `TalentProgressSnapshot`, a chave de coleção `/talent_progress/{userId}` e o selo de conformidade de isolamento contábil (zero vínculo com `ledger_entries`).
-  - Ação de **Exportação CSV** dos snapshots filtrados para conciliação de campanhas sazonais.
+- **What It Does**: Apresenta logo abaixo do banner principal da tela inicial um painel financeiro confiável e responsivo (**Minha Carteira**) que reflete em tempo real a posição fiduciária (`BRL`) do usuário autenticado a partir do livro-razão SHA-256, sem manter saldos paralelos na interface e sem misturar créditos virtuais de consumo (`💎`) com valores elegíveis para saque.
+- **Target Audience / Persona**: Criadores de conteúdo, colaboradores de indicação/desafios e membros autenticados da plataforma JOBS que acompanham seus ganhos, retenções antifraude (`D+14`), última transação registrada e solicitações de saque via PIX.
+- **Key Value**: Transparência contábil auditável (exibindo exatamente o que está disponível, o que está pendente em retenção/escrow, o total histórico recebido sem duplicidades e a última movimentação), combinada com proteção rigorosa contra solicitações duplicadas, condições de corrida e acesso cruzado entre contas.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+### 2. User Experience & Visual Design
 
-- **Fila de Reconciliação Local Determinística vs. Gravação Anônima**:
-  - *Decisão*: Manter o bloqueio contra gravações anônimas no banco de dados e armazenar o snapshot validado em fila local (`synced_local_audit`) até que `onAuthStateChanged` confirme um `uid` real.
-  - *Justificativa*: Preserva o princípio do menor privilégio nas regras de segurança (`isOwner(userId) || isAdmin()`), evita poluição de documentos órfãos no Firestore e garante que nenhuma atividade legítima realizada antes do login seja perdida.
-- **Leitura Administrativa Híbrida (Tempo Real Nuvem + Snapshots Locais Auditados)**:
-  - *Decisão*: O painel administrativo assina a coleção remota `/talent_progress` quando o administrador está autenticado no Firebase Auth e, complementarmente, mescla os snapshots auditados localmente em memória/storage da sessão de produção, identificando explicitamente a origem de cada registro (`cloud` vs. `local_audit`).
-  - *Justificativa*: Permite que o administrador audite tanto os registros persistidos no Firestore quanto o snapshot de produção corrente durante auditorias locais sem simular ou fabricar dados de nuvem.
+- **Key User Flows**:
+  1. **Consulta Imediata na Home**: Logo abaixo do banner de boas-vindas, o usuário visualiza o cartão **Minha Carteira** com badge explícito do ambiente ativo (*Ambiente Sandbox* vs. *Produção Auditada* — com aviso claro de que o motor contábil atual opera localmente sem liquidação bancária externa automática), botão de privacidade (*Ocultar/Mostrar saldo*) e os 4 indicadores centrais:
+     - **Saldo disponível**: valor confirmado em `CREATOR_AVAILABLE_BRL` elegível para saque.
+     - **Saldo pendente**: soma transparente de valores em retenção antifraude (`D+14`) e reservas de saque em processamento (*Escrow*).
+     - **Total recebido**: total histórico acumulado de entradas válidas confirmadas, livre de duplicidades e deduzido de estornos.
+     - **Última movimentação**: cartão compacto exibindo descrição, data/horário, direção/valor (`+` / `-` em `BRL`), identificador de referência e status real da transação mais recente (ou estado informativo quando ainda não houver movimentações no ambiente).
+  2. **Acesso ao Extrato Financeiro (“Ver extrato”)**: Ao acionar **Ver extrato**, abre-se o modal de histórico detalhado com busca textual, filtro por categoria (*Todos*, *Colaboradores*, *Produtores 70%*, *Saques PIX*, *Estornos e Ajustes*) e filtro por status (*Disponível*, *Pendente / Em análise*, *Saque solicitado*, *Saque liquidado*, *Estornado*), exibindo data/hora, tipo, descrição, valor/moeda (`BRL`), status, referência (`referenceId` / `transactionId`) e chave de idempotência mascarada, além de atalho direto para a carteira de Créditos (`💎`).
+  3. **Fluxo de Saque (“Solicitar saque”)**: Ao acionar **Solicitar saque**, o modal verifica autenticação, autorização e elegibilidade (`availableBalanceCents >= 5000`). Se elegível, guia o usuário em 3 etapas (*Formulário PIX com cálculo prévio de valor bruto, tarifa R$ 0,00 e valor líquido estimado* $\rightarrow$ *Revisão e Confirmação Explícita com chave de idempotência* $\rightarrow$ *Comprovante de Solicitação em status Em Análise / under_review*). Se o saldo for inferior a R$ 50,00, exibe o painel informativo de requisitos com o botão de envio desabilitado.
+- **Visual Identity & Theme**:
+  - *Aesthetic Direction*: Dark luxury fintech integrado à estética do JOBS (`#131726` a `#101320`), com superfícies de elevação única e bordas sutis (`border-emerald-500/25` e `border-white/10`).
+  - *Color Palette & Mood*: Esmeralda (`emerald-400`) para saldo disponível e entradas confirmadas; Âmbar (`amber-300`) para retenções pendentes e avisos de ambiente Sandbox; Azul-celeste (`sky-300`) para reservas de saque em processamento (*Escrow*); Roxo (`purple-300`) exclusivamente para o indicador segregado de créditos de consumo (`💎`).
+  - *Typography & Hierarchy*: Números financeiros sempre alinhados com `tabular-nums` (`font-display` para saldos principais e `font-mono` para identificadores de transação, protocolos e chaves de idempotência).
+- **Interactive Feedback & Motion**:
+  - Estados claros para carregamento, ausência de movimentações (especialmente em modo Produção recém-inicializado), bloqueio por falta de saldo mínimo e mensagens de erro ou confirmação de idempotência.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+### 3. Key Product Decisions & Trade-Offs
 
-### A. System Architecture Diagram
+- **Decision 1 — Projeção Contábil Unificada com Centavos Inteiros (`amountCents`)**:
+  - *Chosen Approach*: Derivar **Saldo disponível**, **Saldo pendente**, **Total recebido** e **Última movimentação** diretamente das entradas imutáveis do `financialLedger` em centavos inteiros, sincronizado em tempo real via `financialLedger.subscribe` e `runtimeEnvironmentService.subscribe`.
+  - *Why*: Elimina divergências de ponto flutuante (`IEEE 754`), impede que a interface mantenha estado financeiro próprio e garante que a alternância entre Simulação e Produção reflita imediatamente os dados isolados de cada ambiente.
+  - *Alternatives Considered*: Armazenar contadores de saldo no estado local do componente React ou somar valores na camada visual — descartado por violar a integridade contábil.
+- **Decision 2 — Autorização e Isolamento de Carteira por Sessão (`Actor Authorization Gate`)**:
+  - *Chosen Approach*: Validar no serviço contábil se o `actorId` autenticado corresponde ao titular da carteira consultada ou movimentada (`userId`), rejeitando e registrando no log de auditoria qualquer tentativa de leitura ou saque de outro usuário.
+  - *Why*: Cumpre o princípio do menor privilégio e impede exposição ou movimentação indevida de dados financeiros de terceiros.
+- **Decision 3 — Transparência sobre Natureza do Serviço de Saque**:
+  - *Chosen Approach*: Manter o registro atômico `PAYOUT_RESERVE` com status `'under_review'` (transferindo o valor de `CREATOR_AVAILABLE_BRL` para `CREATOR_PAYOUT_ESCROW`) e informar explicitamente na interface que a solicitação cria uma reserva contábil sujeita à liquidação, sem simular transferência bancária concluída.
+  - *Why*: Impede que uma solicitação pendente seja apresentada como dinheiro enviado ou pago.
+
+---
+
+### 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+- **Architecture & Component Diagram**:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                         CAMADA DE INTERFACE (UI)                             │
-│                                                                              │
-│  ┌────────────────────────────────────┐  ┌────────────────────────────────┐  │
-│  │   Seção "Seu talento vale muito!"  │  │  Painel Central Admin          │  │
-│  │   - Status Nuvem / Auditoria Local │  │  (Seção 7: Criadores)          │  │
-│  │   - Botão Login Google (Produção)  │  │  - Aba Auditoria de Talentos   │  │
-│  │   - Sincronização Manual & Auto    │  │  - Busca, Filtros & JSON View  │  │
-│  └─────────────────┬──────────────────┘  └───────────────┬────────────────┘  │
-└────────────────────┼─────────────────────────────────────┼───────────────────┘
-                     │                                     │
-                     ▼                                     ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│               SERVIÇO DE AUDITORIA E RECONCILIAÇÃO DE TALENTOS               │
-│                                                                              │
+│                        Screen08HomeDashboard (Home)                          │
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ • Coleta determinística dos 5 desafios (Mídias, Chat, Lives, Semana)   │  │
-│  │ • Fila de snapshots pendentes (synced_local_audit) em Modo Produção    │  │
-│  │ • Listener de transição de Auth: reconcilia fila local -> uid real     │  │
-│  │ • Agregador de leitura administrativa (Snapshots Nuvem + Local Audit)  │  │
-│  └─────────────────┬─────────────────────────────────────┬────────────────┘  │
-└────────────────────┼─────────────────────────────────────┼───────────────────┘
-                     │                                     │
-                     ▼                                     ▼
-┌───────────────────────────────────────┐  ┌───────────────────────────────────┐
-│     FIREBASE AUTH & CLOUD FIRESTORE   │  │      GUARDA DE ISOLAMENTO         │
-│                                       │  │                                   │
-│ • onAuthStateChanged / Google Sign-In │  │ • Bloqueia Modo Simulação         │
-│ • Coleção: /talent_progress/{userId}  │  │ • Zero escrita em /ledger_entries │
-│ • Regras: isOwner(userId) || isAdmin()│  │ • Pontos (Pts) != R$ / 💎         │
-└───────────────────────────────────────┘  └───────────────────────────────────┘
+│  │ Top Welcome Banner (Saudação, Cidade, Plano Atual)                     │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                       │
+│                                      ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │ HomeWalletSection ("Minha Carteira" — Abaixo do Banner)                │  │
+│  │  ├─ Indicadores Principais (tabular-nums + modo Ocultar Saldo):        │  │
+│  │  │   • Saldo Disponível (BRL)      • Saldo Pendente (Retenção+Escrow)  │  │
+│  │  │   • Total Recebido (BRL)        • Última Movimentação (Resumo+Data) │  │
+│  │  ├─ Segregação de Origens: Colaboradores vs. Produtores (70%)          │  │
+│  │  ├─ Créditos Virtuais Segregados (💎 Não sacáveis -> abre WalletModal) │  │
+│  │  └─ Ações Principais: [Ver extrato]  |  [Solicitar saque]              │  │
+│  └───────────────┬────────────────────────────────────────┬───────────────┘  │
+└──────────────────┼────────────────────────────────────────┼──────────────────┘
+                   │                                        │
+                   ▼                                        ▼
+┌─────────────────────────────────────┐  ┌─────────────────────────────────────┐
+│ Modal: Extrato Financeiro (BRL)     │  │ Modal: Solicitar Saque PIX          │
+│ • Filtros: Origem, Status e Busca   │  │ • Verificação de Auth & Saldo >= 50 │
+│ • Entradas, Saídas, Estornos,       │  │ • Etapa 1: Valor, PIX e Líquido     │
+│   Ajustes e Solicitações de Saque   │  │ • Etapa 2: Confirmação Explícita    │
+│ • ID de Referência & Idempotência   │  │ • Etapa 3: Protocolo (under_review) │
+└──────────────────┬──────────────────┘  └──────────────────┬──────────────────┘
+                   │                                        │
+                   └───────────────────┬────────────────────┘
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                 financialLedger (FinancialLedgerService)                     │
+│  • Controle de Acesso: valida sessão/actorId contra acesso a outros usuários │
+│  • Fila Assíncrona Serializada (enqueue) + Chave de Idempotência             │
+│  • Isolamento Simulação vs. Produção (runtimeEnvironmentService)             │
+│  • Contas BRL: CREATOR_AVAILABLE_BRL | CREATOR_PENDING_BRL | PAYOUT_ESCROW   │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### B. Data Model & Reconciliação
+- **Data Model & State**:
+  - `UnifiedWalletSummary`: expandido com `totalPendingCents` / `totalPendingBrl` (consolidando `pendingReviewCents` de retenção D+14 + `payoutReservedCents` de saques em análise, mantendo também os campos individuais detalhados) e `lastTransaction: UnifiedWalletStatementItem | null` (representando a transação BRL mais recente do usuário com descrição, timestamp ISO, direção, valor, status e referência).
+  - `UnifiedWalletStatementItem`: inclui `referenceId` explícito, `operationType`, `category` (`collaborator | content_producer | payout | refund | adjustment`), `direction` (`credit | debit`) e `status` (`available | pending_review | payout_reserved | payout_released | refunded`).
+  - `WalletAccessAuthorization`: verificação no `financialLedger` que garante que um usuário comum só possa consultar ou operar sua própria carteira, lançando erro auditado em caso de tentativa de acesso cruzado (`UNAUTHORIZED_WALLET_ACCESS`).
 
-1. **Registro de Snapshot Auditado para Inspeção Administrativa (`AuditedTalentAdminRecord`)**:
-   - `userId`: Identificador do participante (`uid` do Firebase Auth ou identificador local auditado).
-   - `role`: `'produtor_conteudo' | 'colaborador'`.
-   - `environmentMode`: `'production'` (registros de simulação nunca entram na listagem administrativa de produção).
-   - `source`: `'firestore_cloud' | 'local_audit_pending'`.
-   - `cloudPersisted`: Booleano indicando confirmação de gravação remota no Firestore.
-   - `collectionPath`: Caminho canônico `/talent_progress/{userId}`.
-   - `approvedPublishedMediaCount`, `collaboratorVerifiedActionsCount`, `eligibleMutualAndChatInteractionsCount`, `validLiveSessionsCount`, `weeklyActiveDaysCount`, `eligibleEngagementEventsCount`: Contadores inteiros não negativos auditados.
-   - `pontosConquistados`: Pontuação gamificada (`0` a `1000000`).
-   - `levelNumber`: Nível gamificado (`1` a `10`).
-   - `desafiosConcluidosCount`: Total de desafios concluídos (`0` a `5`).
-   - `updatedAtIso`: Carimbo de tempo ISO da última auditoria/sincronização.
-   - `schemaValid`: Verificação local de conformidade estrita com `isValidTalentProgressSnapshot`.
+- **Interactive Component & State Mapping**:
+  - **Assinatura Reativa Dupla**: `HomeWalletSection` subscreve simultaneamente a `financialLedger.subscribe` e `runtimeEnvironmentService.subscribe`, atualizando instantaneamente o resumo e o extrato após qualquer desbloqueio, meta, estorno, solicitação de saque ou troca de modo (Simulação $\leftrightarrow$ Produção).
+  - **Bloco “Última movimentação”**: renderizado no cartão principal com descrição truncada segura, data/hora formatada (`pt-BR`), badge de status real (*Disponível*, *Em Retenção*, *Saque em Análise*, *Liquidado*, *Estornado*), valor em `BRL` (respeitando o modo *Ocultar saldo*) e botão rápido para inspecionar no extrato. Quando não houver movimentações (ex.: conta nova em Produção), exibe mensagem clara *"Nenhuma movimentação financeira registrada neste ambiente"*.
+  - **Validação de Saque em Dupla Camada**:
+    - Na UI: se `availableBalanceCents < 5000`, o modal **Solicitar saque** exibe um aviso estruturado informando o saldo disponível atual, o valor mínimo exigido (`R$ 50,00`) e o valor faltante para habilitação, mantendo o avanço para confirmação desabilitado.
+    - No `financialLedger`: `requestUnifiedWalletPayout` valida `actorId === userId`, `amountCents >= 5000`, `amountCents <= 1000000`, `availableBalanceCents >= amountCents`, formato da chave PIX e `idempotencyKey`, debitando `CREATOR_AVAILABLE_BRL` e creditando `CREATOR_PAYOUT_ESCROW` com status `'under_review'`.
 
-2. **Assinatura de Listagem Administrativa no Firestore**:
-   - Adição de um leitor/assinante para a coleção `/talent_progress` ordenado ou limitado com tratamento seguro de permissões (`OperationType.LIST`), permitindo que administradores autenticados recebam atualizações em tempo real dos documentos gravados na nuvem e que sessões sem privilégio remoto de admin operem de forma resiliente exibindo o diagnóstico de permissão e os snapshots locais auditados.
-
-### C. Interactive State & Action Mapping
-
-- **Transição `synced_local_audit` $\rightarrow$ `synced_cloud` ao Autenticar**:
-  - Quando o usuário clica em **"Entrar com Google"** na seção de talentos (ou quando o estado de autenticação do Firebase muda de `null` para um `FirebaseUser` válido enquanto em Modo Produção), o serviço migra os contadores auditados e dispara automaticamente a gravação de `/talent_progress/{user.uid}` para as perspectivas com snapshot local pendente, atualizando o estado da interface para `synced_cloud`.
-- **Filtros e Inspetor JSON no Painel Administrativo**:
-  - Alterar o texto de busca ou qualquer seletor de filtro recalcula imediatamente a lista exibida e os contadores de resumo sem recarregar a página.
-  - Clicar em **"Ver JSON"** abre o inspetor detalhado do registro selecionado, com opção de copiar o JSON auditado para a área de transferência e verificar todos os 14 campos exigidos pela regra `isValidTalentProgressSnapshot`.
-  - Clicar em **"Sincronizar Agora"** dentro do painel administrativo (quando autenticado) força uma nova rodada de reconciliação com o Firestore e registra a ação no log de auditoria administrativa.
+- **Bateria Obrigatória de Testes Automatizados (10 Cenários Auditáveis)**:
+  1. Exibição do saldo correto (`availableBalanceBrl`, `totalReceivedPeriodBrl`, `lastTransaction`) para o usuário autenticado.
+  2. Separação contábil exata entre saldo disponível (`CREATOR_AVAILABLE_BRL`) e saldo pendente (`CREATOR_PENDING_BRL` + `CREATOR_PAYOUT_ESCROW`), além da separação de créditos `💎`.
+  3. Atualização reativa imediata após uma movimentação válida (novo repasse de produtor ou colaborador).
+  4. Extrato financeiro com valores, datas, referências, direções e estados coerentes (entradas, saídas, estornos, ajustes e saques).
+  5. Bloqueio de solicitação de saque quando o saldo disponível for inferior ao mínimo elegível (`< R$ 50,00`) ou insuficiente.
+  6. Proteção de idempotência contra solicitações de saque duplicadas (`isReplay: true` sem duplo débito) e concorrência serializada.
+  7. Tratamento de falhas de validação (chave PIX inválida, titularidade não confirmada) e manutenção do saque em estado pendente (`under_review`) sem liquidar falsamente.
+  8. Isolamento rigoroso entre dados simulados (`sandbox`) e ambiente de `production` (zero seeds sintéticos em produção).
+  9. Bloqueio de acesso indevido aos dados financeiros e saques de outros usuários (`Cross-User Access Protection`).
+  10. Verificação de integridade e compatibilidade com a `Screen08HomeDashboard` via suíte de testes, `lint_applet` e `compile_applet`.

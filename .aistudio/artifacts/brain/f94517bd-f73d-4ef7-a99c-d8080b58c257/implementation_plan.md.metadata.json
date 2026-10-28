@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de implementação para sincronização automática de snapshots auditados locais (synced_local_audit) ao autenticar no Firebase Auth, controles de login na seção de talentos em produção e painel administrativo de auditoria de progresso de talentos na seção de Criadores com busca, filtros e inspetor JSON.",
-  "updatedAt":  "2026-10-28T11:42:30.391059676Z",
+  "summary":  "Plano de evolução incremental da seção Minha Carteira abaixo do banner da Screen08HomeDashboard, integrando saldos auditados do ledgerService (Saldo disponível, Saldo pendente, Total recebido e Última movimentação), extrato detalhado em BRL com atalho para créditos, fluxo de Solicitar saque com verificação de requisitos e proteção contra acesso cruzado entre usuários.",
+  "updatedAt":  "2026-10-28T13:22:48.463585073Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

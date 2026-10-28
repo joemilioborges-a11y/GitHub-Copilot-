@@ -309,7 +309,8 @@ export interface TalentProgressFirestorePayload {
  * Strictly restricted to production mode and completely isolated from /ledger_entries.
  */
 export async function syncTalentProgressToFirestore(
-  payload: TalentProgressFirestorePayload
+  payload: TalentProgressFirestorePayload,
+  overrideAuthenticatedUid?: string
 ): Promise<boolean> {
   if (payload.environmentMode !== 'production') {
     throw new Error(
@@ -317,13 +318,13 @@ export async function syncTalentProgressToFirestore(
     );
   }
 
-  const currentUser = auth.currentUser;
-  if (!currentUser) {
+  const effectiveUid = overrideAuthenticatedUid || auth.currentUser?.uid;
+  if (!effectiveUid) {
     return false;
   }
 
   const rawUid =
-    payload.userId && payload.userId !== 'current_user' ? payload.userId : currentUser.uid;
+    payload.userId && payload.userId !== 'current_user' ? payload.userId : effectiveUid;
   const safeUserId = rawUid.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
   const path = `talent_progress/${safeUserId}`;
 
@@ -398,4 +399,34 @@ export function subscribeToTalentProgressFromFirestore(
     }
   );
 }
+
+/**
+ * Subscribes to audited TalentProgressSnapshots across /talent_progress for verified administrators (isAdmin()).
+ */
+export function subscribeToAllTalentProgressForAdmin(
+  onData: (records: Array<Record<string, unknown>>) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const path = 'talent_progress';
+  const q = query(collection(db, path), limit(100));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      onData(items);
+    },
+    (error) => {
+      if (onError) {
+        onError(error);
+      } else {
+        try {
+          handleFirestoreError(error, OperationType.LIST, path);
+        } catch {
+          // Logged via handleFirestoreError
+        }
+      }
+    }
+  );
+}
+
 

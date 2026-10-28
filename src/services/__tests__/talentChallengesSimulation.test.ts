@@ -18,6 +18,9 @@ import {
   recordAuditedCollaboratorAction,
   buildAuditedTalentFirestorePayload,
   syncAuditedTalentActivityToCloud,
+  reconcilePendingLocalTalentAuditsOnAuth,
+  listAuditedTalentSnapshotsForAdmin,
+  validateTalentProgressSnapshotSchema,
 } from '../talentChallengesSimulationService';
 import { financialLedger } from '../ledgerService';
 import { runtimeEnvironmentService } from '../runtimeEnvironmentService';
@@ -566,6 +569,162 @@ export async function runTalentChallengesSimulationTestSuite(): Promise<TalentSi
       );
 
       return 'firestore.rules (isValidTalentProgressSnapshot + match /talent_progress/{userId}) e firebase-blueprint.json verificados com bloqueio de deleção e exigência estrita de environmentMode == production.';
+    }
+  );
+
+  // Teste 9: Reconciliação automática de snapshots locais (synced_local_audit) ao autenticar no Firebase Auth
+  await runTest(
+    9,
+    'TALENT-AUTH-RECONCILE-009',
+    'Reconciliação automática de snapshots locais (synced_local_audit -> synced_cloud) ao autenticar no Firebase Auth sem perda de progresso',
+    async () => {
+      const ledgerBefore = financialLedger.getEntries().length;
+
+      // 1. Antes do login, usuário visitante acumula atividade em Produção sob 'current_user'
+      recordAuditedDailyTalentActivity('current_user', '2026-10-21', 'production');
+      recordAuditedDailyTalentActivity('current_user', '2026-10-22', 'production');
+      recordAuditedCollaboratorAction('current_user', 'pre_login_collab_action_99', 'production');
+
+      const preAuthSync = await syncAuditedTalentActivityToCloud({
+        userId: 'current_user',
+        role: 'colaborador',
+        mode: 'production',
+        cloudWriter: async () => false, // visitante sem sessão autenticada -> synced_local_audit
+      });
+
+      assertCondition(
+        preAuthSync.status === 'synced_local_audit' && preAuthSync.cloudPersisted === false,
+        `Esperado synced_local_audit antes da autenticação, obtido: ${JSON.stringify(preAuthSync)}`
+      );
+
+      // 2. Usuário se autentica no Firebase Auth: reconciliação migra contadores para o UID real e grava na nuvem
+      const authenticatedUid = `auth_uid_reconciled_${Date.now()}`;
+      const persistedPayloads: Array<Record<string, unknown>> = [];
+
+      const reconciliation = await reconcilePendingLocalTalentAuditsOnAuth(authenticatedUid, {
+        preferredRole: 'colaborador',
+        mode: 'production',
+        cloudWriter: async (payload, overrideUid) => {
+          assertCondition(
+            overrideUid === authenticatedUid && payload.userId === authenticatedUid,
+            'O UID autenticado deve governar o documento /talent_progress/{userId}.'
+          );
+          persistedPayloads.push({ ...payload });
+          return true;
+        },
+      });
+
+      const collabResult = reconciliation.results.find((r) => r.payload?.role === 'colaborador');
+      assertCondition(
+        reconciliation.reconciledCount >= 1 &&
+          Boolean(collabResult) &&
+          collabResult!.status === 'synced_cloud' &&
+          collabResult!.cloudPersisted === true &&
+          collabResult!.collectionPath === `/talent_progress/${authenticatedUid}` &&
+          collabResult!.payload!.weeklyActiveDaysCount >= 2 &&
+          collabResult!.payload!.collaboratorVerifiedActionsCount >= 1,
+        `Falha na reconciliação pós-login: ${JSON.stringify(reconciliation)}`
+      );
+
+      const ledgerAfter = financialLedger.getEntries().length;
+      assertCondition(
+        ledgerBefore === ledgerAfter,
+        'Reconciliação de login em /talent_progress jamais deve gravar no ledgerService.'
+      );
+
+      return `Snapshot local (synced_local_audit) migrado e reconciliado para /talent_progress/${authenticatedUid} (status=${collabResult!.status}, diasAtivos=${collabResult!.payload!.weeklyActiveDaysCount}, acoesColab=${collabResult!.payload!.collaboratorVerifiedActionsCount}) | Ledger intacto (${ledgerAfter} entradas).`;
+    }
+  );
+
+  // Teste 10: Listagem, busca, filtros combinados e inspetor de schema no painel administrativo (Criadores)
+  await runTest(
+    10,
+    'TALENT-ADMIN-AUDIT-010',
+    'Painel administrativo de auditoria de /talent_progress: busca, filtros (papel, origem, metas), validação de schema e rejeição de simulação',
+    () => {
+      const sampleCloudRecords: Array<Record<string, unknown>> = [
+        {
+          userId: 'creator_valentina_uid',
+          role: 'produtor_conteudo',
+          environmentMode: 'production',
+          approvedPublishedMediaCount: 5,
+          collaboratorVerifiedActionsCount: 0,
+          eligibleMutualAndChatInteractionsCount: 12,
+          validLiveSessionsCount: 3,
+          weeklyActiveDaysCount: 5,
+          eligibleEngagementEventsCount: 18,
+          pontosConquistados: 1800,
+          levelNumber: 4,
+          desafiosConcluidosCount: 5,
+          updatedAt: '2026-10-28T10:00:00.000Z',
+        },
+        {
+          userId: 'collab_carlos_uid',
+          role: 'colaborador',
+          environmentMode: 'production',
+          approvedPublishedMediaCount: 1,
+          collaboratorVerifiedActionsCount: 4,
+          eligibleMutualAndChatInteractionsCount: 6,
+          validLiveSessionsCount: 0,
+          weeklyActiveDaysCount: 3,
+          eligibleEngagementEventsCount: 5,
+          pontosConquistados: 750,
+          levelNumber: 2,
+          desafiosConcluidosCount: 2,
+          updatedAt: '2026-10-28T09:30:00.000Z',
+        },
+        {
+          // Registro inválido de simulação: deve ser sumariamente ignorado pelo agregador de produção
+          userId: 'sim_fake_intruder',
+          role: 'produtor_conteudo',
+          environmentMode: 'simulation',
+          pontosConquistados: 9999,
+        },
+      ];
+
+      const allRecords = listAuditedTalentSnapshotsForAdmin({
+        cloudRecords: sampleCloudRecords,
+      });
+
+      assertCondition(
+        !allRecords.some((r) => r.userId === 'sim_fake_intruder'),
+        'Registros com environmentMode != production jamais devem aparecer na auditoria administrativa.'
+      );
+
+      const completedFilter = listAuditedTalentSnapshotsForAdmin({
+        cloudRecords: sampleCloudRecords,
+        sourceFilter: 'firestore_cloud',
+        completionFilter: 'completed_all',
+      });
+      assertCondition(
+        completedFilter.length === 1 && completedFilter[0].userId === 'creator_valentina_uid',
+        `Filtro completed_all incorreto: ${JSON.stringify(completedFilter)}`
+      );
+
+      const searchAndRoleFilter = listAuditedTalentSnapshotsForAdmin({
+        cloudRecords: sampleCloudRecords,
+        roleFilter: 'colaborador',
+        searchQuery: 'carlos',
+      });
+      assertCondition(
+        searchAndRoleFilter.length === 1 &&
+          searchAndRoleFilter[0].userId === 'collab_carlos_uid' &&
+          searchAndRoleFilter[0].schemaValidation.valid === true,
+        `Filtro de busca/papel incorreto: ${JSON.stringify(searchAndRoleFilter)}`
+      );
+
+      const invalidSchemaCheck = validateTalentProgressSnapshotSchema({
+        userId: 'bad_user',
+        role: 'produtor_conteudo',
+        environmentMode: 'simulation' as any,
+        weeklyActiveDaysCount: 99,
+      });
+      assertCondition(
+        invalidSchemaCheck.valid === false && invalidSchemaCheck.violations.length >= 2,
+        'validateTalentProgressSnapshotSchema deve detectar violações de environmentMode e limites numéricos.'
+      );
+
+      return `Auditoria admin validada: ${allRecords.length} snapshots inspecionados, intruso de simulação rejeitado, filtros (5/5 metas=${completedFilter.length}, busca 'carlos'=${searchAndRoleFilter.length}) e schema JSON (12/12 campos) aprovados.`;
     }
   );
 

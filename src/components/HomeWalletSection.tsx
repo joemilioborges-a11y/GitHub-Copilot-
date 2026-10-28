@@ -7,8 +7,6 @@ import {
   FileText,
   Users,
   Video,
-  Sparkles,
-  Trophy,
   ShieldCheck,
   Clock,
   CheckCircle2,
@@ -19,8 +17,7 @@ import {
   Filter,
   ChevronRight,
   Coins,
-  Share2,
-  PlusCircle,
+  History,
   RefreshCw,
 } from 'lucide-react';
 import {
@@ -32,9 +29,11 @@ import {
   PayoutRecord,
   LedgerEntry,
 } from '../services/ledgerService';
+import { runtimeEnvironmentService } from '../services/runtimeEnvironmentService';
 
-interface HomeWalletSectionProps {
+export interface HomeWalletSectionProps {
   userId?: string;
+  actorUserId?: string;
   userName: string;
   onOpenChallenges?: () => void;
   onOpenCreatorContentStudio?: () => void;
@@ -50,6 +49,15 @@ interface SavedPixDestination {
   pixKey: string;
 }
 
+type WalletStatementStatusFilter =
+  | 'all'
+  | 'available'
+  | 'pending_review'
+  | 'payout_reserved'
+  | 'payout_released'
+  | 'refunded'
+  | 'adjusted';
+
 const brlFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
@@ -63,15 +71,61 @@ export function formatCurrencyBrl(valueBrl: number): string {
 
 export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
   userId = 'current_user',
+  actorUserId,
   userName,
-  onOpenChallenges,
-  onOpenCreatorContentStudio,
-  onOpenReferralModal,
   onOpenCreditsWallet,
 }) => {
-  const [summary, setSummary] = useState<UnifiedWalletSummary>(() =>
-    financialLedger.getUnifiedWalletSummary(userId)
-  );
+  const effectiveActorId = actorUserId ?? userId;
+
+  const [walletAccessError, setWalletAccessError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const [summary, setSummary] = useState<UnifiedWalletSummary>(() => {
+    try {
+      return financialLedger.getUnifiedWalletSummary(userId, {
+        actorUserId: effectiveActorId,
+      });
+    } catch {
+      return {
+        userId,
+        environment: runtimeEnvironmentService.isSimulationMode() ? 'sandbox' : 'production',
+        isSimulation: runtimeEnvironmentService.isSimulationMode(),
+        ledgerModeLabel: 'Acesso restrito ao titular autenticado',
+        currency: 'BRL',
+        availableBalanceCents: 0,
+        availableBalanceBrl: 0,
+        totalPendingCents: 0,
+        totalPendingBrl: 0,
+        totalReceivedPeriodCents: 0,
+        totalReceivedPeriodBrl: 0,
+        collaboratorReceivedCents: 0,
+        collaboratorReceivedBrl: 0,
+        collaboratorPendingCents: 0,
+        collaboratorPendingBrl: 0,
+        contentProducerReceivedCents: 0,
+        contentProducerReceivedBrl: 0,
+        contentProducerPendingCents: 0,
+        contentProducerPendingBrl: 0,
+        pendingReviewCents: 0,
+        pendingReviewBrl: 0,
+        payoutReservedCents: 0,
+        payoutReservedBrl: 0,
+        withdrawnSettledCents: 0,
+        withdrawnSettledBrl: 0,
+        minimumWithdrawalCents: 5000,
+        minimumWithdrawalBrl: 50,
+        maximumDailyWithdrawalCents: 1000000,
+        maximumDailyWithdrawalBrl: 10000,
+        verifiedPixFeeCents: 0,
+        verifiedPixFeeBrl: 0,
+        estimatedSettlementSla: 'Até 1 dia útil após validação antifraude',
+        userConsumptionCredits: 0,
+        lastTransaction: null,
+        lastUpdatedIso: new Date().toISOString(),
+      };
+    }
+  });
+
   const [hideBalance, setHideBalance] = useState<boolean>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY_HIDE_BALANCE) === 'true';
@@ -101,26 +155,38 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
 
   // Estado do Extrato Detalhado
   const [statementCategory, setStatementCategory] = useState<WalletStatementCategoryFilter>('all');
-  const [statementStatusFilter, setStatementStatusFilter] = useState<
-    'all' | 'available' | 'pending_review' | 'payout_reserved'
-  >('all');
+  const [statementStatusFilter, setStatementStatusFilter] =
+    useState<WalletStatementStatusFilter>('all');
   const [statementSearch, setStatementSearch] = useState<string>('');
 
-  // Feedback de simulação de meta conquistada em Sandbox
-  const [goalFeedbackMessage, setGoalFeedbackMessage] = useState<string | null>(null);
-  const [simGoalCount, setSimGoalCount] = useState<number>(0);
-
   const refreshWalletData = useCallback(() => {
-    setSummary(financialLedger.getUnifiedWalletSummary(userId));
-  }, [userId]);
+    setIsRefreshing(true);
+    try {
+      const nextSummary = financialLedger.getUnifiedWalletSummary(userId, {
+        actorUserId: effectiveActorId,
+      });
+      setSummary(nextSummary);
+      setWalletAccessError(null);
+    } catch (err: any) {
+      setWalletAccessError(
+        err?.message || 'Não foi possível carregar os dados financeiros desta carteira.'
+      );
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [userId, effectiveActorId]);
 
   useEffect(() => {
     refreshWalletData();
-    const unsubscribe = financialLedger.subscribe(() => {
+    const unsubLedger = financialLedger.subscribe(() => {
+      refreshWalletData();
+    });
+    const unsubEnv = runtimeEnvironmentService.subscribe(() => {
       refreshWalletData();
     });
     return () => {
-      unsubscribe();
+      unsubLedger();
+      unsubEnv();
     };
   }, [refreshWalletData]);
 
@@ -172,6 +238,25 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
     return financialLedger.validatePixDestination(pixKeyType, pixKeyInput);
   }, [pixKeyType, pixKeyInput]);
 
+  const authCheck = useMemo(() => {
+    return financialLedger.verifyWalletAccessAuthorization(
+      userId,
+      effectiveActorId,
+      'WALLET_UI_CHECK'
+    );
+  }, [userId, effectiveActorId]);
+
+  const canWithdrawNow =
+    authCheck.authorized &&
+    !walletAccessError &&
+    summary.availableBalanceCents >= summary.minimumWithdrawalCents;
+
+  const missingForMinimumCents = Math.max(
+    0,
+    summary.minimumWithdrawalCents - summary.availableBalanceCents
+  );
+  const missingForMinimumBrl = Number((missingForMinimumCents / 100).toFixed(2));
+
   const openWithdrawModal = () => {
     setWithdrawError(null);
     setCompletedPayout(null);
@@ -190,6 +275,13 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
   const handleProceedToConfirm = (e: React.FormEvent) => {
     e.preventDefault();
     setWithdrawError(null);
+
+    if (!authCheck.authorized) {
+      setWithdrawError(
+        authCheck.reason || 'Usuário não autenticado ou sem permissão para solicitar saque.'
+      );
+      return;
+    }
 
     if (parsedWithdrawCents < summary.minimumWithdrawalCents) {
       setWithdrawError(
@@ -250,6 +342,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
     try {
       const result = await financialLedger.requestUnifiedWalletPayout({
         userId,
+        actorUserId: effectiveActorId,
         userName: userName || 'Usuário JOBS',
         amountCents: parsedWithdrawCents,
         pixKeyType,
@@ -275,52 +368,43 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
     }
   };
 
-  // Simulação auditada de conquista de meta diária (apenas em Sandbox)
-  const handleSimulateDailyGoalReward = async () => {
-    if (!summary.isSimulation) return;
-    const nextIdx = simGoalCount + 1;
-    setSimGoalCount(nextIdx);
-    const idempKey = `idemp_sandbox_goal_${userId}_${new Date().toISOString().slice(0, 10)}_${nextIdx}`;
-    try {
-      const res = await financialLedger.recordCollaboratorEarningAtomic({
-        userId,
-        amountCents: 1500, // R$ 15,00
-        subType: 'challenge_goal',
-        title: `Meta Diária #${nextIdx}: Desafio & Compartilhamento de Conteúdo Concluído`,
-        referenceId: `goal_daily_${nextIdx}`,
-        idempotencyKey: idempKey,
-      });
-      refreshWalletData();
-      setGoalFeedbackMessage(
-        res.isReplay
-          ? 'Meta já contabilizada anteriormente (proteção de idempotência ativa).'
-          : `+${formatCurrencyBrl(res.amountBrl)} creditados em Valores recebidos de colaboradores e no Saldo disponível!`
-      );
-      setTimeout(() => setGoalFeedbackMessage(null), 5000);
-    } catch (err: any) {
-      setGoalFeedbackMessage(err?.message || 'Falha ao simular conquista de meta.');
-    }
-  };
-
   // Lista filtrada para o modal de extrato
   const statementItems = useMemo(() => {
-    const rawItems = financialLedger.getUnifiedWalletStatement(userId, statementCategory);
-    return rawItems.filter((item) => {
-      if (statementStatusFilter !== 'all' && item.status !== statementStatusFilter) {
-        return false;
-      }
-      if (statementSearch.trim()) {
-        const q = statementSearch.trim().toLowerCase();
-        return (
-          item.description.toLowerCase().includes(q) ||
-          item.transactionId.toLowerCase().includes(q) ||
-          item.categoryLabel.toLowerCase().includes(q) ||
-          item.subTypeLabel.toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [userId, statementCategory, statementStatusFilter, statementSearch, summary.lastUpdatedIso]);
+    if (walletAccessError || !authCheck.authorized) return [];
+    try {
+      const rawItems = financialLedger.getUnifiedWalletStatement(userId, statementCategory, {
+        actorUserId: effectiveActorId,
+      });
+      return rawItems.filter((item) => {
+        if (statementStatusFilter !== 'all' && item.status !== statementStatusFilter) {
+          return false;
+        }
+        if (statementSearch.trim()) {
+          const q = statementSearch.trim().toLowerCase();
+          return (
+            item.description.toLowerCase().includes(q) ||
+            item.transactionId.toLowerCase().includes(q) ||
+            item.referenceId.toLowerCase().includes(q) ||
+            item.categoryLabel.toLowerCase().includes(q) ||
+            item.subTypeLabel.toLowerCase().includes(q) ||
+            item.operationType.toLowerCase().includes(q)
+          );
+        }
+        return true;
+      });
+    } catch {
+      return [];
+    }
+  }, [
+    userId,
+    effectiveActorId,
+    authCheck.authorized,
+    walletAccessError,
+    statementCategory,
+    statementStatusFilter,
+    statementSearch,
+    summary.lastUpdatedIso,
+  ]);
 
   const statementTotals = useMemo(() => {
     let creditsCents = 0;
@@ -338,10 +422,10 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
     };
   }, [statementItems]);
 
-  const canWithdrawNow = summary.availableBalanceCents >= summary.minimumWithdrawalCents;
+  const lastTx = summary.lastTransaction;
 
   return (
-    <section aria-label="Minha Carteira e Incentivos" className="space-y-4">
+    <section aria-label="Minha Carteira" className="space-y-4">
       {/* =================================================================== */}
       {/* CARTÃO PRINCIPAL: MINHA CARTEIRA                                    */}
       {/* =================================================================== */}
@@ -371,17 +455,27 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                     {summary.isSimulation ? 'Ambiente Sandbox' : 'Produção Auditada'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-400">
-                  Livro-razão contábil unificado · Repasses em Reais (BRL)
-                </p>
+                <p className="text-xs text-slate-400">{summary.ledgerModeLabel}</p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={refreshWalletData}
+                title="Atualizar saldos a partir do livro-razão"
+                aria-label="Atualizar saldos da carteira"
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </button>
+
+              <button
+                type="button"
                 onClick={toggleHideBalance}
-                aria-label={hideBalance ? 'Revelar valores da carteira' : 'Ocultar valores da carteira'}
+                aria-label={
+                  hideBalance ? 'Revelar valores da carteira' : 'Ocultar valores da carteira'
+                }
                 className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 {hideBalance ? (
@@ -399,57 +493,183 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
             </div>
           </div>
 
-          {/* Bloco Principal: Saldo Disponível para Saque + Ações Principais */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-black/35 border border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Saldo disponível para saque</span>
+          {/* Alerta de erro de acesso ou carregamento */}
+          {walletAccessError && (
+            <div
+              role="alert"
+              className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/35 text-rose-200 text-xs font-semibold flex items-start gap-2.5"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>{walletAccessError}</span>
+            </div>
+          )}
+
+          {/* Bloco Principal: Saldo Disponível, Saldo Pendente, Total Recebido + Botões de Ação */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-black/35 border border-white/10 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              {/* Indicador 1: Saldo Disponível */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Saldo disponível</span>
+                </div>
+                <div
+                  data-testid="wallet-available-balance"
+                  className="text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight tabular-nums"
+                >
+                  {renderMonetaryValue(summary.availableBalanceBrl)}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                  <span>
+                    Mínimo para saque:{' '}
+                    <strong className="text-emerald-300 tabular-nums">
+                      {formatCurrencyBrl(summary.minimumWithdrawalBrl)}
+                    </strong>{' '}
+                    (PIX isento de tarifa)
+                  </span>
+                  <span className="hidden sm:inline text-slate-600">·</span>
+                  <span>
+                    status:{' '}
+                    <strong className={canWithdrawNow ? 'text-emerald-300' : 'text-amber-300'}>
+                      {canWithdrawNow
+                        ? 'Elegível para solicitar saque'
+                        : `Faltam ${formatCurrencyBrl(missingForMinimumBrl)} para o mínimo`}
+                    </strong>
+                  </span>
+                </div>
               </div>
-              <div
-                data-testid="wallet-available-balance"
-                className="text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight"
-              >
-                {renderMonetaryValue(summary.availableBalanceBrl)}
-              </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400 pt-1">
-                <span>
-                  Total recebido no período:{' '}
-                  <strong className="text-slate-200">
-                    {renderMonetaryValue(summary.totalReceivedPeriodBrl)}
-                  </strong>
-                </span>
-                <span className="hidden sm:inline text-slate-600">•</span>
-                <span>
-                  Mínimo para saque:{' '}
-                  <strong className="text-emerald-300">
-                    {formatCurrencyBrl(summary.minimumWithdrawalBrl)}
-                  </strong>{' '}
-                  (PIX sem tarifa)
-                </span>
+
+              {/* Botões Principais: Solicitar saque & Ver extrato */}
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  data-testid="wallet-withdraw-btn"
+                  onClick={openWithdrawModal}
+                  disabled={Boolean(walletAccessError)}
+                  className="flex-1 sm:flex-initial px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-40 text-slate-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <ArrowUpRight className="w-4 h-4 stroke-[2.5]" />
+                  <span>Solicitar saque</span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="wallet-statement-btn"
+                  onClick={() => setIsStatementModalOpen(true)}
+                  disabled={Boolean(walletAccessError)}
+                  className="flex-1 sm:flex-initial px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/15 text-white font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <FileText className="w-4 h-4 text-slate-300" />
+                  <span>Ver extrato</span>
+                </button>
               </div>
             </div>
 
-            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 shrink-0">
-              <button
-                type="button"
-                data-testid="wallet-withdraw-btn"
-                onClick={openWithdrawModal}
-                className="flex-1 sm:flex-initial px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer"
-              >
-                <ArrowUpRight className="w-4 h-4 stroke-[2.5]" />
-                <span>Sacar</span>
-              </button>
+            {/* Indicadores 2 e 3: Saldo Pendente & Total Recebido */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-white/10">
+              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Saldo pendente</span>
+                  </div>
+                  <div
+                    data-testid="wallet-pending-balance"
+                    className="text-lg sm:text-xl font-display font-extrabold text-white tabular-nums"
+                  >
+                    {renderMonetaryValue(summary.totalPendingBrl)}
+                  </div>
+                  <div className="text-[11px] text-slate-400 tabular-nums">
+                    Retenção D+14: {renderMonetaryValue(summary.pendingReviewBrl)} · Reserva de
+                    saque: {renderMonetaryValue(summary.payoutReservedBrl)}
+                  </div>
+                </div>
+              </div>
 
-              <button
-                type="button"
-                data-testid="wallet-statement-btn"
-                onClick={() => setIsStatementModalOpen(true)}
-                className="flex-1 sm:flex-initial px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-white font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                <FileText className="w-4 h-4 text-slate-300" />
-                <span>Ver extrato</span>
-              </button>
+              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Total recebido</span>
+                  </div>
+                  <div
+                    data-testid="wallet-total-received"
+                    className="text-lg sm:text-xl font-display font-extrabold text-white tabular-nums"
+                  >
+                    {renderMonetaryValue(summary.totalReceivedPeriodBrl)}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Entradas históricas confirmadas em BRL (sem duplicidades)
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Indicador 4: Última Movimentação */}
+            <div
+              data-testid="wallet-last-transaction"
+              className="p-3.5 rounded-xl bg-[#0d101d]/90 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 shrink-0 mt-0.5">
+                  <History className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                    <span className="font-bold text-slate-200">Última movimentação</span>
+                    {lastTx && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          {new Date(lastTx.timestamp).toLocaleString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="font-semibold text-emerald-300">{lastTx.statusLabel}</span>
+                      </>
+                    )}
+                  </div>
+
+                  {lastTx ? (
+                    <div className="text-xs sm:text-sm font-semibold text-white truncate">
+                      {lastTx.description}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400">
+                      Nenhuma movimentação financeira registrada neste ambiente até o momento.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {lastTx && (
+                <div className="flex sm:flex-col items-center sm:items-end justify-between gap-2 shrink-0">
+                  <div
+                    className={`text-sm font-display font-extrabold tabular-nums ${
+                      lastTx.direction === 'credit' ? 'text-emerald-400' : 'text-sky-300'
+                    }`}
+                  >
+                    {lastTx.direction === 'credit' ? '+' : '-'}{' '}
+                    {renderMonetaryValue(lastTx.amountBrl)}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatementCategory('all');
+                      setStatementStatusFilter('all');
+                      setIsStatementModalOpen(true);
+                    }}
+                    className="text-[11px] text-slate-300 hover:text-white underline cursor-pointer"
+                  >
+                    Ref: {lastTx.referenceId}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -465,7 +685,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   </span>
                   <div
                     data-testid="wallet-collaborator-received"
-                    className="text-xl sm:text-2xl font-display font-extrabold text-white"
+                    className="text-xl sm:text-2xl font-display font-extrabold text-white tabular-nums"
                   >
                     {renderMonetaryValue(summary.collaboratorReceivedBrl)}
                   </div>
@@ -485,8 +705,8 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
               <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-white/5 pt-2.5">
                 <span>Indicações verificadas, comissões e metas de desafios</span>
                 {summary.collaboratorPendingBrl > 0 && (
-                  <span className="text-amber-300 font-semibold shrink-0 ml-2">
-                    + {renderMonetaryValue(summary.collaboratorPendingBrl)} em análise
+                  <span className="text-amber-300 font-semibold shrink-0 ml-2 tabular-nums">
+                    + {renderMonetaryValue(summary.collaboratorPendingBrl)} pendente
                   </span>
                 )}
               </div>
@@ -502,7 +722,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   </span>
                   <div
                     data-testid="wallet-producer-received"
-                    className="text-xl sm:text-2xl font-display font-extrabold text-white"
+                    className="text-xl sm:text-2xl font-display font-extrabold text-white tabular-nums"
                   >
                     {renderMonetaryValue(summary.contentProducerReceivedBrl)}
                   </div>
@@ -522,7 +742,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
               <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-white/5 pt-2.5">
                 <span>Repasse líquido 70% de fotos/vídeos VIP e presentes em lives</span>
                 {summary.contentProducerPendingBrl > 0 && (
-                  <span className="text-amber-300 font-semibold shrink-0 ml-2">
+                  <span className="text-amber-300 font-semibold shrink-0 ml-2 tabular-nums">
                     + {renderMonetaryValue(summary.contentProducerPendingBrl)} em retenção
                   </span>
                 )}
@@ -530,7 +750,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
             </div>
           </div>
 
-          {/* Linha de Estados Contábeis Complementares (Pendentes, Reservados em Saque e Créditos Separados) */}
+          {/* Linha de Estados Contábeis Complementares (Retenção D+14, Reserva Escrow e Créditos Separados) */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
             <div className="px-3.5 py-2.5 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -539,7 +759,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
                     Pendente / Em análise
                   </div>
-                  <div className="text-xs font-bold text-amber-300">
+                  <div className="text-xs font-bold text-amber-300 tabular-nums">
                     {renderMonetaryValue(summary.pendingReviewBrl)}
                   </div>
                 </div>
@@ -554,7 +774,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
                     Saques em processamento
                   </div>
-                  <div className="text-xs font-bold text-sky-300">
+                  <div className="text-xs font-bold text-sky-300 tabular-nums">
                     {renderMonetaryValue(summary.payoutReservedBrl)}
                   </div>
                 </div>
@@ -569,7 +789,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
                     Créditos de consumo (Não sacáveis)
                   </div>
-                  <div className="text-xs font-bold text-purple-300">
+                  <div className="text-xs font-bold text-purple-300 tabular-nums">
                     {hideBalance ? '••• 💎' : `${summary.userConsumptionCredits} 💎`}
                   </div>
                 </div>
@@ -589,7 +809,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
       </div>
 
       {/* =================================================================== */}
-      {/* MODAL DE SOLICITAÇÃO DE SAQUE ("SACAR")                             */}
+      {/* MODAL DE SOLICITAÇÃO DE SAQUE ("SOLICITAR SAQUE")                   */}
       {/* =================================================================== */}
       {isWithdrawModalOpen && (
         <div
@@ -606,13 +826,16 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   <ArrowUpRight className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 id="withdraw-modal-title" className="text-base font-display font-extrabold text-white">
+                  <h3
+                    id="withdraw-modal-title"
+                    className="text-base font-display font-extrabold text-white"
+                  >
                     Solicitar Saque PIX
                   </h3>
                   <p className="text-[11px] text-slate-400">
                     {summary.isSimulation
                       ? 'Ambiente Sandbox · Reserva contábil sem transferência bancária externa'
-                      : 'Ambiente de Produção · Sujeito à validação antifraude'}
+                      : 'Ambiente de Produção · Reserva contábil sujeita à validação antifraude'}
                   </p>
                 </div>
               </div>
@@ -630,19 +853,46 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
               <div className="p-4 rounded-2xl bg-black/40 border border-white/10 grid grid-cols-2 gap-3">
                 <div>
                   <div className="text-[11px] text-slate-400">Saldo disponível para saque</div>
-                  <div className="text-xl font-display font-extrabold text-emerald-400">
+                  <div className="text-xl font-display font-extrabold text-emerald-400 tabular-nums">
                     {formatCurrencyBrl(summary.availableBalanceBrl)}
                   </div>
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">Valor mínimo / Tarifa PIX</div>
-                  <div className="text-sm font-bold text-white">
+                  <div className="text-sm font-bold text-white tabular-nums">
                     {formatCurrencyBrl(summary.minimumWithdrawalBrl)} ·{' '}
                     <span className="text-emerald-300">Tarifa R$ 0,00</span>
                   </div>
                   <div className="text-[10px] text-slate-400">{summary.estimatedSettlementSla}</div>
                 </div>
               </div>
+
+              {/* Aviso de Requisitos Pendentes quando saldo disponível < R$ 50,00 */}
+              {!canWithdrawNow && (
+                <div
+                  data-testid="withdraw-eligibility-warning"
+                  className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/35 text-amber-200 text-xs space-y-1.5"
+                >
+                  <div className="font-bold flex items-center gap-2 text-amber-300">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>Requisitos de Elegibilidade para Saque</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    Para solicitar um saque via PIX, é necessário possuir saldo disponível confirmado
+                    de pelo menos{' '}
+                    <strong>{formatCurrencyBrl(summary.minimumWithdrawalBrl)}</strong>. No momento,
+                    seu saldo disponível é{' '}
+                    <strong>{formatCurrencyBrl(summary.availableBalanceBrl)}</strong> (faltam{' '}
+                    <strong>{formatCurrencyBrl(missingForMinimumBrl)}</strong>).
+                  </p>
+                  {summary.totalPendingBrl > 0 && (
+                    <p className="text-[11px] text-amber-300/90">
+                      Você possui <strong>{formatCurrencyBrl(summary.totalPendingBrl)}</strong> em
+                      saldo pendente aguardando confirmação ou liberação de retenção D+14.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {withdrawError && (
                 <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-200 text-xs font-semibold flex items-start gap-2">
@@ -664,7 +914,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                       value={amountInput}
                       onChange={(e) => setAmountInput(e.target.value)}
                       placeholder="Ex: 50,00"
-                      className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-white font-display font-bold text-lg focus:outline-none focus:border-emerald-400"
+                      className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/15 text-white font-display font-bold text-lg tabular-nums focus:outline-none focus:border-emerald-400"
                     />
                     <div className="flex flex-wrap items-center gap-2 mt-2">
                       <button
@@ -781,7 +1031,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   <div className="p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/25 space-y-1.5 text-xs">
                     <div className="flex justify-between text-slate-300">
                       <span>Valor bruto solicitado:</span>
-                      <span className="font-bold text-white">
+                      <span className="font-bold text-white tabular-nums">
                         {formatCurrencyBrl(parsedWithdrawBrl)}
                       </span>
                     </div>
@@ -791,7 +1041,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                     </div>
                     <div className="flex justify-between text-sm font-extrabold text-white border-t border-white/10 pt-1.5">
                       <span>Valor líquido estimado a receber:</span>
-                      <span className="text-emerald-400">
+                      <span className="text-emerald-400 tabular-nums">
                         {formatCurrencyBrl(parsedWithdrawBrl)}
                       </span>
                     </div>
@@ -836,7 +1086,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Valor bruto do saque:</span>
-                      <span className="font-bold text-white">
+                      <span className="font-bold text-white tabular-nums">
                         {formatCurrencyBrl(parsedWithdrawBrl)}
                       </span>
                     </div>
@@ -846,7 +1096,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                     </div>
                     <div className="flex justify-between text-sm font-extrabold border-t border-white/10 pt-2">
                       <span className="text-white">Valor líquido a receber:</span>
-                      <span className="text-emerald-400">
+                      <span className="text-emerald-400 tabular-nums">
                         {formatCurrencyBrl(parsedWithdrawBrl)}
                       </span>
                     </div>
@@ -866,9 +1116,9 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
 
                   <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
                     <strong>Transparência Contábil:</strong> Ao confirmar, o valor será reservado
-                    atomicamente no livro-razão (status <em>Em análise / Solicitado</em>). A
-                    transferência somente é marcada como liquidada após confirmação do serviço de
-                    pagamentos.
+                    atomicamente no livro-razão (status <em>Em análise / under_review</em>). A
+                    solicitação não representa transferência bancária já concluída até a liquidação
+                    final.
                   </div>
 
                   <div className="flex items-center justify-between gap-3 pt-2">
@@ -908,8 +1158,8 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                       </div>
                       <p className="text-xs text-emerald-200 leading-relaxed">
                         O valor de{' '}
-                        <strong>{formatCurrencyBrl(completedPayout.payout.netAmountBrl)}</strong> foi
-                        reservado de forma atômica no livro-razão e encontra-se com status{' '}
+                        <strong>{formatCurrencyBrl(completedPayout.payout.netAmountBrl)}</strong>{' '}
+                        foi reservado de forma atômica no livro-razão e encontra-se com status{' '}
                         <strong>Em análise (under_review)</strong>.
                       </p>
                     </div>
@@ -977,7 +1227,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
         >
           <div className="w-full max-w-3xl rounded-3xl bg-[#101320] border border-white/15 shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
             {/* Cabeçalho do Extrato */}
-            <div className="p-5 border-b border-white/10 flex items-center justify-between bg-[#15192b]">
+            <div className="p-5 border-b border-white/10 flex flex-wrap items-center justify-between gap-3 bg-[#15192b]">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-indigo-500/15 border border-indigo-500/35 flex items-center justify-center text-indigo-400">
                   <FileText className="w-5 h-5" />
@@ -987,31 +1237,50 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                     id="statement-modal-title"
                     className="text-base sm:text-lg font-display font-extrabold text-white"
                   >
-                    Extrato Detalhado — Minha Carteira
+                    Extrato Detalhado — Minha Carteira (BRL)
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Histórico imutável auditado pelo Livro-Razão SHA-256 em Reais (BRL)
+                    Histórico imutável auditado pelo Livro-Razão SHA-256 · Entradas, saídas,
+                    estornos, ajustes e saques
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsStatementModalOpen(false)}
-                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+
+              <div className="flex items-center gap-2">
+                {onOpenCreditsWallet && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsStatementModalOpen(false);
+                      onOpenCreditsWallet();
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/35 text-purple-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Coins className="w-3.5 h-3.5 text-purple-300" />
+                    <span>Extrato de Créditos (💎)</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsStatementModalOpen(false)}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Barra de Filtros e Resumo */}
             <div className="p-4 border-b border-white/10 bg-black/30 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {(
                   [
-                    { id: 'all', label: 'Todos os Lançamentos' },
-                    { id: 'collaborator', label: 'Colaboradores (Indicações & Metas)' },
-                    { id: 'content_producer', label: 'Produtores de Conteúdo (70%)' },
-                    { id: 'payout', label: 'Saques PIX' },
+                    { id: 'all', label: 'Todos' },
+                    { id: 'collaborator', label: 'Colaboradores' },
+                    { id: 'content_producer', label: 'Produtores (70%)' },
+                    { id: 'payout', label: 'Solicitações de Saque' },
+                    { id: 'refund', label: 'Estornos' },
+                    { id: 'adjustment', label: 'Ajustes' },
                   ] as Array<{ id: WalletStatementCategoryFilter; label: string }>
                 ).map((tab) => (
                   <button
@@ -1036,7 +1305,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                     type="text"
                     value={statementSearch}
                     onChange={(e) => setStatementSearch(e.target.value)}
-                    placeholder="Buscar por descrição, origem ou ID da transação..."
+                    placeholder="Buscar por descrição, tipo, referência ou ID da transação..."
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/50 border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-400"
                   />
                 </div>
@@ -1045,13 +1314,18 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                   <Filter className="w-3.5 h-3.5 text-slate-400" />
                   <select
                     value={statementStatusFilter}
-                    onChange={(e) => setStatementStatusFilter(e.target.value as any)}
+                    onChange={(e) =>
+                      setStatementStatusFilter(e.target.value as WalletStatementStatusFilter)
+                    }
                     className="px-3 py-2 rounded-xl bg-black/50 border border-white/10 text-xs text-slate-200 focus:outline-none"
                   >
                     <option value="all">Todos os status</option>
                     <option value="available">Disponível para Saque</option>
-                    <option value="pending_review">Em Retenção / Análise</option>
-                    <option value="payout_reserved">Saque Solicitado (Escrow)</option>
+                    <option value="pending_review">Pendente / Retenção D+14</option>
+                    <option value="payout_reserved">Solicitação de Saque (Escrow)</option>
+                    <option value="payout_released">Saque Liquidado</option>
+                    <option value="refunded">Estornado</option>
+                    <option value="adjusted">Ajuste Auditado</option>
                   </select>
                 </div>
               </div>
@@ -1059,19 +1333,19 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
               <div className="grid grid-cols-3 gap-2 pt-1 text-xs">
                 <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
                   <span className="text-[10px] text-slate-400 block">Entradas no filtro</span>
-                  <strong className="text-emerald-400">
+                  <strong className="text-emerald-400 tabular-nums">
                     + {formatCurrencyBrl(statementTotals.creditsBrl)}
                   </strong>
                 </div>
                 <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
-                  <span className="text-[10px] text-slate-400 block">Saques / Reservas</span>
-                  <strong className="text-sky-300">
+                  <span className="text-[10px] text-slate-400 block">Saídas / Reservas</span>
+                  <strong className="text-sky-300 tabular-nums">
                     - {formatCurrencyBrl(statementTotals.debitsBrl)}
                   </strong>
                 </div>
                 <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
                   <span className="text-[10px] text-slate-400 block">Saldo Disponível Atual</span>
-                  <strong className="text-white">
+                  <strong className="text-white tabular-nums">
                     {formatCurrencyBrl(summary.availableBalanceBrl)}
                   </strong>
                 </div>
@@ -1091,30 +1365,24 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                     className="p-3.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all"
                   >
                     <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
-                            item.category === 'collaborator'
-                              ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/35'
-                              : item.category === 'content_producer'
-                              ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
-                              : item.category === 'payout'
-                              ? 'bg-sky-500/15 text-sky-300 border-sky-500/35'
-                              : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
-                          }`}
-                        >
-                          {item.categoryLabel}
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className="font-bold text-slate-200">{item.categoryLabel}</span>
+                        <span className="text-slate-600" aria-hidden="true">
+                          ·
                         </span>
-                        <span className="text-[10px] text-slate-400 font-semibold">
-                          {item.subTypeLabel}
+                        <span className="text-slate-400 font-semibold">{item.subTypeLabel}</span>
+                        <span className="text-slate-600" aria-hidden="true">
+                          ·
                         </span>
                         <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            item.status === 'available'
-                              ? 'bg-emerald-500/15 text-emerald-300'
+                          className={`font-bold ${
+                            item.status === 'available' || item.status === 'payout_released'
+                              ? 'text-emerald-300'
                               : item.status === 'pending_review'
-                              ? 'bg-amber-500/15 text-amber-300'
-                              : 'bg-sky-500/15 text-sky-300'
+                              ? 'text-amber-300'
+                              : item.status === 'refunded'
+                              ? 'text-rose-300'
+                              : 'text-sky-300'
                           }`}
                         >
                           {item.statusLabel}
@@ -1135,6 +1403,7 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
                             minute: '2-digit',
                           })}
                         </span>
+                        <span>Ref: {item.referenceId}</span>
                         <span>ID: {item.id}</span>
                         <span>Idemp: {item.idempotencyKeyMasked}</span>
                       </div>
@@ -1142,15 +1411,15 @@ export const HomeWalletSection: React.FC<HomeWalletSectionProps> = ({
 
                     <div className="text-left sm:text-right shrink-0">
                       <div
-                        className={`text-base font-display font-extrabold ${
+                        className={`text-base font-display font-extrabold tabular-nums ${
                           item.direction === 'credit' ? 'text-emerald-400' : 'text-sky-300'
                         }`}
                       >
                         {item.direction === 'credit' ? '+' : '-'}{' '}
-                        {formatCurrencyBrl(item.amountBrl)}
+                        {formatCurrencyBrl(item.amountBrl)} ({item.currency})
                       </div>
                       <div className="text-[10px] text-slate-400">
-                        {item.isSandbox ? 'Sandbox Auditado' : 'Produção'}
+                        {item.isSandbox ? 'Sandbox Auditado' : 'Produção Auditada'}
                       </div>
                     </div>
                   </div>

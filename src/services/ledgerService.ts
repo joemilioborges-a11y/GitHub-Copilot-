@@ -196,17 +196,48 @@ export type WalletStatementCategoryFilter =
   | 'collaborator'
   | 'content_producer'
   | 'payout'
-  | 'refund';
+  | 'refund'
+  | 'adjustment';
 
 export type PixKeyType = 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'RANDOM';
+
+export interface UnifiedWalletStatementItem {
+  id: string;
+  transactionId: string;
+  referenceId: string;
+  operationType: LedgerOperationType;
+  timestamp: string;
+  description: string;
+  category: 'collaborator' | 'content_producer' | 'payout' | 'refund' | 'adjustment';
+  categoryLabel: string;
+  subTypeLabel: string;
+  direction: 'credit' | 'debit';
+  currency: 'BRL';
+  amountCents: number;
+  amountBrl: number;
+  status:
+    | 'available'
+    | 'pending_review'
+    | 'payout_reserved'
+    | 'payout_released'
+    | 'refunded'
+    | 'adjusted';
+  statusLabel: string;
+  idempotencyKeyMasked: string;
+  sha256ReferenceHash?: string;
+  isSandbox: boolean;
+}
 
 export interface UnifiedWalletSummary {
   userId: string;
   environment: PayoutEnvironment;
   isSimulation: boolean;
+  ledgerModeLabel: string;
   currency: 'BRL';
   availableBalanceCents: number;
   availableBalanceBrl: number;
+  totalPendingCents: number;
+  totalPendingBrl: number;
   totalReceivedPeriodCents: number;
   totalReceivedPeriodBrl: number;
   collaboratorReceivedCents: number;
@@ -231,25 +262,8 @@ export interface UnifiedWalletSummary {
   verifiedPixFeeBrl: number;
   estimatedSettlementSla: string;
   userConsumptionCredits: number;
+  lastTransaction: UnifiedWalletStatementItem | null;
   lastUpdatedIso: string;
-}
-
-export interface UnifiedWalletStatementItem {
-  id: string;
-  transactionId: string;
-  timestamp: string;
-  description: string;
-  category: 'collaborator' | 'content_producer' | 'payout' | 'refund';
-  categoryLabel: string;
-  subTypeLabel: string;
-  direction: 'credit' | 'debit';
-  amountCents: number;
-  amountBrl: number;
-  status: 'available' | 'pending_review' | 'payout_reserved' | 'payout_released' | 'refunded';
-  statusLabel: string;
-  idempotencyKeyMasked: string;
-  sha256ReferenceHash?: string;
-  isSandbox: boolean;
 }
 
 export interface LiveUnlockAuditTransaction {
@@ -3247,15 +3261,91 @@ class FinancialLedgerService {
   }
 
   /**
+   * Verifica e aplica o controle de autorização e isolamento de carteira entre usuários.
+   * Impede que um usuário comum consulte saldos, extratos ou solicite saques de terceiros.
+   */
+  public verifyWalletAccessAuthorization(
+    targetUserId: string,
+    actorUserId?: string,
+    operationName: string = 'WALLET_ACCESS'
+  ): { authorized: boolean; actorId: string; reason?: string } {
+    const cleanTarget = (targetUserId || '').trim();
+    const cleanActor = (actorUserId ?? cleanTarget).trim();
+
+    if (!cleanTarget) {
+      return {
+        authorized: false,
+        actorId: cleanActor || 'anonymous',
+        reason: 'Identificador do titular da carteira é obrigatório.',
+      };
+    }
+
+    if (!cleanActor) {
+      return {
+        authorized: false,
+        actorId: 'anonymous',
+        reason: 'Sessão de usuário não autenticada para acessar dados financeiros.',
+      };
+    }
+
+    const isAdminActor = cleanActor.startsWith('admin_');
+    if (cleanActor !== cleanTarget && !isAdminActor) {
+      this.recordAudit({
+        actorId: cleanActor,
+        action: 'UNAUTHORIZED_WALLET_ACCESS_BLOCKED',
+        reason: `Tentativa bloqueada de ${operationName} na carteira de ${maskUserId(cleanTarget)} pelo ator ${maskUserId(cleanActor)}`,
+        ipHash: computeSha256Simulated(`ip_unauth_${cleanActor}`),
+        isSandbox: runtimeEnvironmentService.isSimulationMode(),
+        payload: {
+          operationName,
+          targetUserMasked: maskUserId(cleanTarget),
+          actorUserMasked: maskUserId(cleanActor),
+        },
+      });
+      return {
+        authorized: false,
+        actorId: cleanActor,
+        reason: `Acesso negado: o usuário autenticado (${maskUserId(
+          cleanActor
+        )}) não possui permissão para acessar ou movimentar a carteira de outro titular (${maskUserId(
+          cleanTarget
+        )}).`,
+      };
+    }
+
+    return {
+      authorized: true,
+      actorId: cleanActor,
+    };
+  }
+
+  private assertWalletAccessAuthorized(
+    targetUserId: string,
+    actorUserId?: string,
+    operationName: string = 'WALLET_ACCESS'
+  ): void {
+    const check = this.verifyWalletAccessAuthorization(targetUserId, actorUserId, operationName);
+    if (!check.authorized) {
+      throw new Error(check.reason || 'Acesso não autorizado à carteira financeira.');
+    }
+  }
+
+  /**
    * Consolida os indicadores da "Minha Carteira" na Tela Inicial diretamente a partir
    * do livro-razão contábil, separando estritamente:
    * - Saldo disponível para saque (BRL)
-   * - Valores recebidos de colaboradores (BRL)
-   * - Valores recebidos de produtores de conteúdo (BRL)
-   * - Valores pendentes/em análise (BRL) e reservados em saque (BRL)
+   * - Saldo pendente total e segregado (Retenção D+14 + Reserva Escrow de Saque)
+   * - Total recebido histórico de entradas válidas (BRL)
+   * - Última movimentação registrada (descrição, data, valor, referência e status)
+   * - Valores recebidos de colaboradores (BRL) vs. produtores de conteúdo (BRL)
    * - Créditos virtuais de consumo (CREDITS - não sacáveis)
    */
-  public getUnifiedWalletSummary(userId: string = 'current_user'): UnifiedWalletSummary {
+  public getUnifiedWalletSummary(
+    userId: string = 'current_user',
+    options?: { actorUserId?: string }
+  ): UnifiedWalletSummary {
+    this.assertWalletAccessAuthorized(userId, options?.actorUserId, 'WALLET_SUMMARY_READ');
+
     if (userId === 'current_user') {
       this.ensureUnifiedWalletSandboxSeeds('current_user');
     }
@@ -3350,19 +3440,30 @@ class FinancialLedgerService {
     const safePendingCents = Math.max(0, pendingReviewCents);
     const safePayoutReservedCents = Math.max(0, payoutReservedCents);
     const safeWithdrawnSettledCents = Math.max(0, withdrawnSettledCents);
+    const totalPendingCents = safePendingCents + safePayoutReservedCents;
     const totalReceivedPeriodCents = safeCollaboratorCents + safeProducerCents;
 
     const minimumWithdrawalCents = 5000; // R$ 50,00
     const maximumDailyWithdrawalCents = 1000000; // R$ 10.000,00
     const verifiedPixFeeCents = 0; // Tarifa zero para PIX verificado
 
+    const statementItems = this.getUnifiedWalletStatement(userId, 'all', {
+      actorUserId: options?.actorUserId ?? userId,
+    });
+    const lastTransaction = statementItems.length > 0 ? statementItems[0] : null;
+
     return {
       userId,
       environment: env,
       isSimulation: isSim,
+      ledgerModeLabel: isSim
+        ? 'Livro-razão local demonstrativo (Ambiente Sandbox)'
+        : 'Livro-razão auditado em Produção (Reserva contábil sem liquidação bancária automática)',
       currency: 'BRL',
       availableBalanceCents: safeAvailableCents,
       availableBalanceBrl: Number((safeAvailableCents / 100).toFixed(2)),
+      totalPendingCents,
+      totalPendingBrl: Number((totalPendingCents / 100).toFixed(2)),
       totalReceivedPeriodCents,
       totalReceivedPeriodBrl: Number((totalReceivedPeriodCents / 100).toFixed(2)),
       collaboratorReceivedCents: safeCollaboratorCents,
@@ -3387,18 +3488,22 @@ class FinancialLedgerService {
       verifiedPixFeeBrl: 0.0,
       estimatedSettlementSla: 'Até 1 dia útil após validação antifraude',
       userConsumptionCredits: this.getUserCredits(userId),
+      lastTransaction,
       lastUpdatedIso: new Date().toISOString(),
     };
   }
 
   /**
    * Retorna o extrato detalhado da "Minha Carteira" com classificação auditável
-   * por origem (Colaboradores, Produtores de Conteúdo, Saques e Estornos).
+   * por origem (Colaboradores, Produtores de Conteúdo, Saques, Estornos e Ajustes).
    */
   public getUnifiedWalletStatement(
     userId: string = 'current_user',
-    categoryFilter: WalletStatementCategoryFilter = 'all'
+    categoryFilter: WalletStatementCategoryFilter = 'all',
+    options?: { actorUserId?: string }
   ): UnifiedWalletStatementItem[] {
+    this.assertWalletAccessAuthorized(userId, options?.actorUserId, 'WALLET_STATEMENT_READ');
+
     if (userId === 'current_user') {
       this.ensureUnifiedWalletSandboxSeeds('current_user');
     }
@@ -3429,7 +3534,7 @@ class FinancialLedgerService {
           : Math.round(entry.amount * 100);
       const amountBrl = Number((cents / 100).toFixed(2));
 
-      let category: 'collaborator' | 'content_producer' | 'payout' | 'refund' = 'content_producer';
+      let category: UnifiedWalletStatementItem['category'] = 'content_producer';
       let categoryLabel = 'Produtor de Conteúdo';
       let subTypeLabel = (entry.metadata?.subTypeLabel as string) || 'Repasse 70%';
       let direction: 'credit' | 'debit' = 'credit';
@@ -3442,11 +3547,13 @@ class FinancialLedgerService {
         entry.operationType === 'PAYOUT_REVERSAL'
       ) {
         category = 'payout';
-        categoryLabel = 'Saque / Transferência';
+        categoryLabel = 'Solicitação de Saque';
         if (entry.operationType === 'PAYOUT_RESERVE') {
+          // Quando a reserva de saque já foi sucedida por uma liquidação (PAYOUT_SETTLED) para o mesmo referenceId,
+          // preservamos o registro histórico de reserva como reserva contábil, sem duplicar com o registro de liquidação.
           direction = 'debit';
           status = 'payout_reserved';
-          statusLabel = 'Em Análise / Reservado';
+          statusLabel = 'Solicitação Pendente (Reserva Escrow)';
           subTypeLabel = 'Solicitação de Saque PIX';
         } else if (entry.operationType === 'PAYOUT_SETTLED') {
           direction = 'debit';
@@ -3459,13 +3566,33 @@ class FinancialLedgerService {
           statusLabel = 'Estorno de Saque Devolvido';
           subTypeLabel = 'Devolução ao Saldo Disponível';
         }
-      } else if (entry.operationType === 'REFUND' || entry.status === 'refunded') {
+      } else if (
+        entry.operationType === 'REFUND' ||
+        entry.operationType === 'CHARGEBACK' ||
+        entry.status === 'refunded'
+      ) {
         category = 'refund';
         categoryLabel = 'Estorno Contábil';
-        direction = entry.debitAccount === availAccount || entry.debitAccount === pendingAccount ? 'debit' : 'credit';
+        direction =
+          entry.debitAccount === availAccount || entry.debitAccount === pendingAccount
+            ? 'debit'
+            : 'credit';
         status = 'refunded';
         statusLabel = 'Estornado';
-        subTypeLabel = 'Ajuste / Estorno';
+        subTypeLabel =
+          entry.operationType === 'CHARGEBACK'
+            ? 'Contestação / Chargeback'
+            : 'Estorno Compensatório';
+      } else if (entry.operationType === 'ADMIN_ADJUSTMENT') {
+        category = 'adjustment';
+        categoryLabel = 'Ajuste Contábil';
+        direction =
+          entry.creditAccount === availAccount || entry.creditAccount === pendingAccount
+            ? 'credit'
+            : 'debit';
+        status = 'adjusted';
+        statusLabel = 'Ajuste Auditado';
+        subTypeLabel = (entry.metadata?.subTypeLabel as string) || 'Ajuste Administrativo';
       } else {
         const origin = this.classifyWalletEntryOrigin(entry);
         category = origin;
@@ -3483,7 +3610,7 @@ class FinancialLedgerService {
 
         if (entry.creditAccount === pendingAccount) {
           status = 'pending_review';
-          statusLabel = 'Em Retenção / Análise';
+          statusLabel = 'Pendente / Retenção D+14';
         } else {
           status = 'available';
           statusLabel = 'Disponível para Saque';
@@ -3497,12 +3624,15 @@ class FinancialLedgerService {
       items.push({
         id: entry.id,
         transactionId: entry.transactionId || entry.id,
+        referenceId: entry.referenceId || entry.transactionId || entry.id,
+        operationType: entry.operationType,
         timestamp: entry.timestamp,
         description: entry.description,
         category,
         categoryLabel,
         subTypeLabel,
         direction,
+        currency: 'BRL',
         amountCents: cents,
         amountBrl,
         status,
@@ -3512,6 +3642,9 @@ class FinancialLedgerService {
         isSandbox: entry.isSandbox,
       });
     }
+
+    // Ordenar da movimentação mais recente para a mais antiga
+    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
     return items;
   }
@@ -3632,6 +3765,7 @@ class FinancialLedgerService {
    */
   public async requestUnifiedWalletPayout(params: {
     userId: string;
+    actorUserId?: string;
     userName: string;
     amountCents: number;
     pixKeyType: PixKeyType;
@@ -3649,6 +3783,11 @@ class FinancialLedgerService {
       if (!params.userId || !params.userId.trim()) {
         throw new Error('Identificação do usuário é obrigatória para solicitar saque.');
       }
+      this.assertWalletAccessAuthorized(
+        params.userId,
+        params.actorUserId ?? params.userId,
+        'WALLET_PAYOUT_REQUEST'
+      );
       if (!params.idempotencyKey || !params.idempotencyKey.trim()) {
         throw new Error('Chave de idempotência obrigatória para solicitação de saque.');
       }

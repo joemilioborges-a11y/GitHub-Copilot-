@@ -21,6 +21,8 @@ import { HomeWalletSection } from '../HomeWalletSection';
 import { TalentWorthSection } from '../TalentWorthSection';
 
 interface Screen08HomeDashboardProps {
+  userId?: string;
+  actorUserId?: string;
   userProfile: UserProfileData;
   subscription: UserSubscription;
   profiles: Profile[];
@@ -35,6 +37,8 @@ interface Screen08HomeDashboardProps {
 }
 
 export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
+  userId = 'current_user',
+  actorUserId,
   userProfile,
   subscription,
   profiles,
@@ -91,9 +95,10 @@ export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
         </div>
       </div>
 
-      {/* Minha Carteira Financeira Unificada */}
+      {/* Minha Carteira Financeira Unificada (Imediatamente abaixo do banner) */}
       <HomeWalletSection
-        userId="current_user"
+        userId={userId}
+        actorUserId={actorUserId ?? userId}
         userName={userProfile.name || 'Usuário JOBS'}
         onOpenChallenges={onOpenChallenges}
         onOpenCreatorContentStudio={onOpenCreatorContentStudio}

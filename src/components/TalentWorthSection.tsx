@@ -26,6 +26,8 @@ import {
   Inbox,
   RefreshCw,
   Cloud,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
 import {
   TalentParticipantRole,
@@ -37,10 +39,18 @@ import {
   advanceSimulatedChallengeStep,
   recordAuditedDailyTalentActivity,
   syncAuditedTalentActivityToCloud,
+  reconcilePendingLocalTalentAuditsOnAuth,
 } from '../services/talentChallengesSimulationService';
 import { runtimeEnvironmentService, RuntimeEnvironmentMode } from '../services/runtimeEnvironmentService';
 import { exclusiveContentAndInterestService } from '../services/exclusiveContentAndInterestService';
 import { matchAndMessagingService } from '../services/matchAndMessagingService';
+import {
+  auth,
+  subscribeToAuthChanges,
+  signInWithGoogle,
+  signOutFirebase,
+} from '../firebase';
+import type { User as FirebaseUser } from 'firebase/auth';
 
 export interface TalentWorthSectionProps {
   userId?: string;
@@ -62,6 +72,8 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
   const [environmentMode, setEnvironmentMode] = useState<RuntimeEnvironmentMode>(() =>
     runtimeEnvironmentService.getMode()
   );
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [auditRefreshTick, setAuditRefreshTick] = useState(0);
   const [role, setRole] = useState<TalentParticipantRole>('produtor_conteudo');
   const [seedsByRole, setSeedsByRole] = useState<
@@ -78,6 +90,9 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
   const [cloudSyncState, setCloudSyncState] = useState<TalentCloudSyncResult | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
 
+  const effectiveUserId =
+    userId && userId !== 'current_user' ? userId : firebaseUser?.uid || 'current_user';
+
   useEffect(() => {
     const unsubscribeEnv = runtimeEnvironmentService.subscribe((nextMode) => {
       setEnvironmentMode(nextMode);
@@ -91,12 +106,38 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
     const unsubscribeMatch = matchAndMessagingService.subscribe(() => {
       setAuditRefreshTick((t) => t + 1);
     });
+    const unsubscribeAuth = subscribeToAuthChanges((nextUser) => {
+      setFirebaseUser(nextUser);
+      if (nextUser && runtimeEnvironmentService.getMode() === 'production') {
+        setIsCloudSyncing(true);
+        reconcilePendingLocalTalentAuditsOnAuth(nextUser.uid, {
+          preferredRole: role,
+          mode: 'production',
+        })
+          .then((rec) => {
+            setAuditRefreshTick((t) => t + 1);
+            const activeResult =
+              rec.results.find((r) => r.payload?.role === role) || rec.results[0] || null;
+            if (activeResult) {
+              setCloudSyncState(activeResult);
+            }
+            if (rec.reconciledCount > 0) {
+              setSimulationFeedback(rec.message);
+            }
+            setIsCloudSyncing(false);
+          })
+          .catch(() => {
+            setIsCloudSyncing(false);
+          });
+      }
+    });
     return () => {
       unsubscribeEnv();
       unsubscribeExcl();
       unsubscribeMatch();
+      unsubscribeAuth();
     };
-  }, []);
+  }, [role]);
 
   const isSimulation = environmentMode === 'simulation';
 
@@ -110,9 +151,10 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
     }
     setIsCloudSyncing(true);
     syncAuditedTalentActivityToCloud({
-      userId,
+      userId: effectiveUserId,
       role,
       mode: 'production',
+      overrideAuthenticatedUid: firebaseUser?.uid,
     })
       .then((res) => {
         if (active) {
@@ -128,7 +170,7 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
     return () => {
       active = false;
     };
-  }, [environmentMode, role, userId, auditRefreshTick]);
+  }, [environmentMode, role, effectiveUserId, firebaseUser?.uid, auditRefreshTick]);
 
   const currentSeeds = useMemo(() => {
     if (!isSimulation) return undefined;
@@ -140,11 +182,11 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
     () =>
       buildTalentDashboardStateByEnvironment({
         role,
-        userId,
+        userId: effectiveUserId,
         mode: environmentMode,
         customSeeds: currentSeeds,
       }),
-    [role, userId, environmentMode, currentSeeds, auditRefreshTick]
+    [role, effectiveUserId, environmentMode, currentSeeds, auditRefreshTick]
   );
 
   const toggleExpandChallenge = (challengeId: string) => {
@@ -175,22 +217,65 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
   };
 
   const handleSyncProductionProgress = async () => {
-    recordAuditedDailyTalentActivity(userId, undefined, 'production');
+    recordAuditedDailyTalentActivity(effectiveUserId, undefined, 'production');
     setAuditRefreshTick((t) => t + 1);
     setIsCloudSyncing(true);
     const syncResult = await syncAuditedTalentActivityToCloud({
-      userId,
+      userId: effectiveUserId,
       role,
       mode: 'production',
+      overrideAuthenticatedUid: firebaseUser?.uid,
     });
     setCloudSyncState(syncResult);
     setIsCloudSyncing(false);
     setSimulationFeedback(syncResult.message);
   };
 
+  const handleGoogleLoginAndReconcile = async () => {
+    if (isSigningIn) return;
+    setIsSigningIn(true);
+    try {
+      const signedInUser = await signInWithGoogle();
+      setFirebaseUser(signedInUser);
+      const reconciliation = await reconcilePendingLocalTalentAuditsOnAuth(signedInUser.uid, {
+        preferredRole: role,
+        mode: 'production',
+      });
+      setAuditRefreshTick((t) => t + 1);
+      const activeRes =
+        reconciliation.results.find((r) => r.payload?.role === role) ||
+        reconciliation.results[0] ||
+        null;
+      if (activeRes) {
+        setCloudSyncState(activeRes);
+      }
+      setSimulationFeedback(reconciliation.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setSimulationFeedback(
+        `Autenticação não concluída (${msg.slice(0, 80)}). O snapshot permanece validado localmente (synced_local_audit).`
+      );
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleSignOutProduction = async () => {
+    try {
+      await signOutFirebase();
+      setFirebaseUser(null);
+      setAuditRefreshTick((t) => t + 1);
+      setSimulationFeedback(
+        'Sessão Firebase encerrada. Novos eventos de produção serão validados localmente até novo login.'
+      );
+    } catch {
+      // ignore sign-out error
+    }
+  };
+
   const handleTriggerModuleAction = (target: TalentActionTarget, challengeTitle: string) => {
     if (!isSimulation) {
-      recordAuditedDailyTalentActivity(userId, undefined, 'production');
+      recordAuditedDailyTalentActivity(effectiveUserId, undefined, 'production');
       setAuditRefreshTick((t) => t + 1);
     }
     switch (target) {
@@ -303,9 +388,9 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
                   ? 'Sincronizando Firestore...'
                   : cloudSyncState?.cloudPersisted
                   ? 'Firestore: /talent_progress sincronizado'
-                  : 'Auditoria ativa (/talent_progress)'}
+                  : 'Auditoria local validada (synced_local_audit)'}
                 {cloudSyncState?.lastSyncedAtIso && (
-                  <span className="text-[10px] text-slate-300 font-normal">
+                  <span className="text-[10px] text-slate-300 font-normal tabular-nums">
                     •{' '}
                     {new Date(cloudSyncState.lastSyncedAtIso).toLocaleTimeString('pt-BR', {
                       hour: '2-digit',
@@ -342,7 +427,7 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
                 setRole('produtor_conteudo');
                 setSimulationFeedback(null);
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 role === 'produtor_conteudo'
                   ? 'bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 shadow-md'
                   : 'text-slate-300 hover:text-white'
@@ -356,7 +441,7 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
                 setRole('colaborador');
                 setSimulationFeedback(null);
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 role === 'colaborador'
                   ? 'bg-gradient-to-r from-indigo-400 to-emerald-400 text-slate-950 shadow-md'
                   : 'text-slate-300 hover:text-white'
@@ -402,12 +487,44 @@ export const TalentWorthSection: React.FC<TalentWorthSectionProps> = ({
               </button>
             </div>
           ) : (
-            /* Controle de sincronização real em Modo Produção */
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            /* Controles de autenticação e sincronização real em Modo Produção */
+            <div className="flex flex-wrap items-center justify-end gap-2 text-[11px]">
+              {!firebaseUser ? (
+                <button
+                  type="button"
+                  onClick={handleGoogleLoginAndReconcile}
+                  disabled={isSigningIn}
+                  data-testid="talent-production-google-login-btn"
+                  className="px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-200 font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+                >
+                  <LogIn className="w-3.5 h-3.5 text-sky-400" />
+                  <span>
+                    {isSigningIn
+                      ? 'Autenticando...'
+                      : 'Entrar com Google (Salvar na nuvem)'}
+                  </span>
+                </button>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-slate-300">
+                  <span className="font-semibold text-emerald-300 truncate max-w-[160px]">
+                    {firebaseUser.displayName || firebaseUser.email || firebaseUser.uid.slice(0, 10)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSignOutProduction}
+                    title="Encerrar sessão Firebase"
+                    className="text-slate-400 hover:text-rose-300 inline-flex items-center gap-1 pl-1 border-l border-white/10 cursor-pointer"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>Sair</span>
+                  </button>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={handleSyncProductionProgress}
-                className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-200 font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-200 font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0"
               >
                 <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Sincronizar progresso auditado</span>

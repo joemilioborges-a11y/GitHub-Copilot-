@@ -1106,6 +1106,171 @@ export interface TalentCloudSyncResult {
 }
 
 const lastTalentSyncStateByUserAndRole = new Map<string, TalentCloudSyncResult>();
+const STORAGE_BASE_KEY_PENDING_LOCAL_AUDITS = 'jobs_talent_pending_local_audits_v1';
+
+export interface TalentProgressSchemaValidationResult {
+  valid: boolean;
+  checkedFieldsCount: number;
+  violations: string[];
+}
+
+export interface AuditedTalentAdminRecord {
+  recordKey: string;
+  userId: string;
+  role: TalentParticipantRole;
+  roleLabel: string;
+  environmentMode: 'production';
+  source: 'firestore_cloud' | 'local_audit_pending';
+  sourceLabel: string;
+  cloudPersisted: boolean;
+  collectionPath: string;
+  approvedPublishedMediaCount: number;
+  collaboratorVerifiedActionsCount: number;
+  eligibleMutualAndChatInteractionsCount: number;
+  validLiveSessionsCount: number;
+  weeklyActiveDaysCount: number;
+  eligibleEngagementEventsCount: number;
+  pontosConquistados: number;
+  levelNumber: number;
+  desafiosConcluidosCount: number;
+  updatedAtIso: string;
+  schemaValidation: TalentProgressSchemaValidationResult;
+  canonicalPayload: TalentProgressFirestorePayload;
+}
+
+export interface TalentAuthReconciliationResult {
+  authenticatedUid: string;
+  reconciledCount: number;
+  rolesReconciled: TalentParticipantRole[];
+  results: TalentCloudSyncResult[];
+  message: string;
+}
+
+function loadPendingLocalAuditQueue(): Record<string, TalentCloudSyncResult> {
+  const storage = getSafeTalentStorage();
+  const scopedKey = runtimeEnvironmentService.getScopedStorageKey(
+    STORAGE_BASE_KEY_PENDING_LOCAL_AUDITS,
+    'production'
+  );
+  try {
+    const raw = storage.getItem(scopedKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return parsed as Record<string, TalentCloudSyncResult>;
+      }
+    }
+  } catch {
+    // ignore storage parse failure
+  }
+  return {};
+}
+
+function savePendingLocalAuditQueue(queue: Record<string, TalentCloudSyncResult>): void {
+  const storage = getSafeTalentStorage();
+  const scopedKey = runtimeEnvironmentService.getScopedStorageKey(
+    STORAGE_BASE_KEY_PENDING_LOCAL_AUDITS,
+    'production'
+  );
+  storage.setItem(scopedKey, JSON.stringify(queue));
+}
+
+function migrateLocalAuditedCountersToAuthenticatedUid(
+  fromUserId: string,
+  targetUid: string
+): void {
+  const cleanFrom = (fromUserId || '').trim();
+  const cleanTarget = (targetUid || '').trim();
+  if (!cleanFrom || !cleanTarget || cleanFrom === cleanTarget) return;
+
+  const storage = getSafeTalentStorage();
+
+  // 1. Migra dias ativos na semana em produção
+  const weeklyKey = runtimeEnvironmentService.getScopedStorageKey(
+    STORAGE_BASE_KEY_WEEKLY_ACTIVITY,
+    'production'
+  );
+  try {
+    const rawWeekly = storage.getItem(weeklyKey);
+    if (rawWeekly) {
+      const weeklyMap = JSON.parse(rawWeekly) as Record<string, string[]>;
+      const fromDays = Array.isArray(weeklyMap[cleanFrom]) ? weeklyMap[cleanFrom] : [];
+      const toDays = Array.isArray(weeklyMap[cleanTarget]) ? weeklyMap[cleanTarget] : [];
+      if (fromDays.length > 0) {
+        weeklyMap[cleanTarget] = Array.from(new Set([...toDays, ...fromDays]))
+          .sort()
+          .slice(-7);
+        storage.setItem(weeklyKey, JSON.stringify(weeklyMap));
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Migra ações verificadas de colaborador em produção
+  const collabKey = runtimeEnvironmentService.getScopedStorageKey(
+    STORAGE_BASE_KEY_COLLAB_ACTIONS,
+    'production'
+  );
+  try {
+    const rawCollab = storage.getItem(collabKey);
+    if (rawCollab) {
+      const collabMap = JSON.parse(rawCollab) as Record<string, string[]>;
+      const fromActions = Array.isArray(collabMap[cleanFrom]) ? collabMap[cleanFrom] : [];
+      const toActions = Array.isArray(collabMap[cleanTarget]) ? collabMap[cleanTarget] : [];
+      if (fromActions.length > 0) {
+        collabMap[cleanTarget] = Array.from(new Set([...toActions, ...fromActions]));
+        storage.setItem(collabKey, JSON.stringify(collabMap));
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Valida se um payload de progresso de talentos atende integralmente às restrições
+ * da função server-side `isValidTalentProgressSnapshot` em `firestore.rules`.
+ */
+export function validateTalentProgressSnapshotSchema(
+  candidate: Partial<TalentProgressFirestorePayload> | Record<string, unknown>
+): TalentProgressSchemaValidationResult {
+  const violations: string[] = [];
+  const data = (candidate || {}) as Record<string, unknown>;
+
+  if (typeof data.userId !== 'string' || data.userId.length < 1 || data.userId.length > 128) {
+    violations.push('userId deve ser string entre 1 e 128 caracteres.');
+  }
+  if (data.role !== 'produtor_conteudo' && data.role !== 'colaborador') {
+    violations.push('role deve ser "produtor_conteudo" ou "colaborador".');
+  }
+  if (data.environmentMode !== 'production') {
+    violations.push('environmentMode deve ser estritamente "production".');
+  }
+
+  const checkIntRange = (field: string, min: number, max: number) => {
+    const val = data[field];
+    if (typeof val !== 'number' || !Number.isInteger(val) || val < min || val > max) {
+      violations.push(`${field} deve ser inteiro entre ${min} e ${max}.`);
+    }
+  };
+
+  checkIntRange('approvedPublishedMediaCount', 0, 1000000);
+  checkIntRange('collaboratorVerifiedActionsCount', 0, 1000000);
+  checkIntRange('eligibleMutualAndChatInteractionsCount', 0, 1000000);
+  checkIntRange('validLiveSessionsCount', 0, 1000000);
+  checkIntRange('weeklyActiveDaysCount', 0, 7);
+  checkIntRange('eligibleEngagementEventsCount', 0, 1000000);
+  checkIntRange('pontosConquistados', 0, 1000000);
+  checkIntRange('levelNumber', 1, 10);
+  checkIntRange('desafiosConcluidosCount', 0, 5);
+
+  return {
+    valid: violations.length === 0,
+    checkedFieldsCount: 12,
+    violations,
+  };
+}
 
 /**
  * Constrói o payload canônico e validado para a coleção protegida /talent_progress/{userId}.
@@ -1170,10 +1335,19 @@ export async function syncAuditedTalentActivityToCloud(options?: {
   userId?: string;
   role?: TalentParticipantRole;
   mode?: RuntimeEnvironmentMode;
+  overrideAuthenticatedUid?: string;
+  cloudWriter?: (
+    payload: TalentProgressFirestorePayload,
+    overrideAuthenticatedUid?: string
+  ) => Promise<boolean>;
 }): Promise<TalentCloudSyncResult> {
   const role = options?.role || 'produtor_conteudo';
   const mode = options?.mode || runtimeEnvironmentService.getMode();
-  const rawUserId = options?.userId || auth.currentUser?.uid || 'current_user';
+  const effectiveAuthUid = options?.overrideAuthenticatedUid || auth.currentUser?.uid;
+  const rawUserId =
+    options?.userId && options.userId !== 'current_user'
+      ? options.userId
+      : effectiveAuthUid || 'current_user';
   const safeUserId = rawUserId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || 'current_user';
   const stateKey = `${safeUserId}:${role}`;
 
@@ -1194,9 +1368,10 @@ export async function syncAuditedTalentActivityToCloud(options?: {
   const nowIso = new Date().toISOString();
   const payload = buildAuditedTalentFirestorePayload(safeUserId, role, 'production');
   const collectionPath = `/talent_progress/${payload.userId}`;
+  const writer = options?.cloudWriter || syncTalentProgressToFirestore;
 
   try {
-    const cloudPersisted = await syncTalentProgressToFirestore(payload);
+    const cloudPersisted = await writer(payload, effectiveAuthUid);
     const result: TalentCloudSyncResult = {
       status: cloudPersisted ? 'synced_cloud' : 'synced_local_audit',
       cloudPersisted,
@@ -1208,6 +1383,16 @@ export async function syncAuditedTalentActivityToCloud(options?: {
         : `Snapshot auditado validado localmente (${collectionPath}); autentique-se para persistência em nuvem.`,
     };
     lastTalentSyncStateByUserAndRole.set(stateKey, result);
+
+    const pendingQueue = loadPendingLocalAuditQueue();
+    if (!cloudPersisted) {
+      pendingQueue[stateKey] = result;
+    } else {
+      delete pendingQueue[stateKey];
+      delete pendingQueue[`current_user:${role}`];
+    }
+    savePendingLocalAuditQueue(pendingQueue);
+
     return result;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -1220,6 +1405,9 @@ export async function syncAuditedTalentActivityToCloud(options?: {
       message: `Auditoria local preservada; falha na gravação remota em ${collectionPath}: ${errMsg.slice(0, 120)}`,
     };
     lastTalentSyncStateByUserAndRole.set(stateKey, fallbackResult);
+    const pendingQueue = loadPendingLocalAuditQueue();
+    pendingQueue[stateKey] = fallbackResult;
+    savePendingLocalAuditQueue(pendingQueue);
     return fallbackResult;
   }
 }
@@ -1232,6 +1420,301 @@ export function getLastAuditedTalentSyncState(
     (userId && userId !== 'current_user' ? userId : auth.currentUser?.uid || 'current_user')
       .replace(/[^a-zA-Z0-9_-]/g, '_')
       .slice(0, 128) || 'current_user';
-  return lastTalentSyncStateByUserAndRole.get(`${safeUserId}:${role}`) || null;
+  const key = `${safeUserId}:${role}`;
+  if (lastTalentSyncStateByUserAndRole.has(key)) {
+    return lastTalentSyncStateByUserAndRole.get(key) || null;
+  }
+  const pendingQueue = loadPendingLocalAuditQueue();
+  return pendingQueue[key] || null;
 }
+
+/**
+ * Reconcilia automaticamente todos os snapshots locais pendentes (synced_local_audit)
+ * para a conta autenticada no Firebase Auth quando em Modo Produção.
+ */
+export async function reconcilePendingLocalTalentAuditsOnAuth(
+  authenticatedUid: string,
+  options?: {
+    preferredRole?: TalentParticipantRole;
+    mode?: RuntimeEnvironmentMode;
+    cloudWriter?: (
+      payload: TalentProgressFirestorePayload,
+      overrideAuthenticatedUid?: string
+    ) => Promise<boolean>;
+  }
+): Promise<TalentAuthReconciliationResult> {
+  const cleanUid = (authenticatedUid || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const mode = options?.mode || runtimeEnvironmentService.getMode();
+
+  if (!cleanUid || cleanUid === 'current_user' || mode !== 'production') {
+    return {
+      authenticatedUid: cleanUid || 'unauthenticated',
+      reconciledCount: 0,
+      rolesReconciled: [],
+      results: [],
+      message:
+        mode !== 'production'
+          ? 'Reconciliação ignorada: ambiente em Modo Simulação.'
+          : 'Nenhum usuário autenticado elegível para reconciliação.',
+    };
+  }
+
+  const pendingQueue = loadPendingLocalAuditQueue();
+  const rolesToReconcile = new Set<TalentParticipantRole>();
+
+  if (options?.preferredRole) {
+    rolesToReconcile.add(options.preferredRole);
+  }
+
+  for (const [stateKey, item] of Object.entries(pendingQueue)) {
+    if (item && !item.cloudPersisted && item.payload?.environmentMode === 'production') {
+      const [recordedUserId, recordedRole] = stateKey.split(':');
+      if (recordedUserId && recordedUserId !== cleanUid) {
+        migrateLocalAuditedCountersToAuthenticatedUid(recordedUserId, cleanUid);
+      }
+      if (recordedRole === 'produtor_conteudo' || recordedRole === 'colaborador') {
+        rolesToReconcile.add(recordedRole);
+      }
+    }
+  }
+
+  for (const [stateKey, item] of lastTalentSyncStateByUserAndRole.entries()) {
+    if (item && !item.cloudPersisted && item.payload?.environmentMode === 'production') {
+      const [recordedUserId, recordedRole] = stateKey.split(':');
+      if (recordedUserId && recordedUserId !== cleanUid) {
+        migrateLocalAuditedCountersToAuthenticatedUid(recordedUserId, cleanUid);
+      }
+      if (recordedRole === 'produtor_conteudo' || recordedRole === 'colaborador') {
+        rolesToReconcile.add(recordedRole);
+      }
+    }
+  }
+
+  // Garante migração de contadores registrados sob 'current_user' antes do login
+  migrateLocalAuditedCountersToAuthenticatedUid('current_user', cleanUid);
+
+  if (rolesToReconcile.size === 0) {
+    rolesToReconcile.add('produtor_conteudo');
+  }
+
+  const results: TalentCloudSyncResult[] = [];
+  const rolesReconciled: TalentParticipantRole[] = [];
+
+  for (const role of rolesToReconcile) {
+    const syncRes = await syncAuditedTalentActivityToCloud({
+      userId: cleanUid,
+      role,
+      mode: 'production',
+      overrideAuthenticatedUid: cleanUid,
+      cloudWriter: options?.cloudWriter,
+    });
+    results.push(syncRes);
+    if (syncRes.cloudPersisted) {
+      rolesReconciled.push(role);
+      // Limpa entradas locais anteriores de visitantes
+      for (const key of Object.keys(pendingQueue)) {
+        if (key.endsWith(`:${role}`)) {
+          delete pendingQueue[key];
+        }
+      }
+      lastTalentSyncStateByUserAndRole.delete(`current_user:${role}`);
+    }
+  }
+
+  savePendingLocalAuditQueue(pendingQueue);
+
+  return {
+    authenticatedUid: cleanUid,
+    reconciledCount: rolesReconciled.length,
+    rolesReconciled,
+    results,
+    message:
+      rolesReconciled.length > 0
+        ? `Snapshots locais reconciliados automaticamente no Firestore (/talent_progress/${cleanUid}) para ${rolesReconciled.length} perspectiva(s).`
+        : `Snapshot auditado validado para ${cleanUid}.`,
+  };
+}
+
+function normalizeTimestampIso(raw: unknown, fallbackIso: string): string {
+  if (!raw) return fallbackIso;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && raw !== null) {
+    const maybeTs = raw as { toDate?: () => Date; seconds?: number };
+    if (typeof maybeTs.toDate === 'function') {
+      try {
+        return maybeTs.toDate().toISOString();
+      } catch {
+        return fallbackIso;
+      }
+    }
+    if (typeof maybeTs.seconds === 'number') {
+      return new Date(maybeTs.seconds * 1000).toISOString();
+    }
+  }
+  return fallbackIso;
+}
+
+/**
+ * Lista, valida e filtra todos os snapshots auditados de /talent_progress/{userId}
+ * para inspeção administrativa na aba de Criadores do CentralAdminDashboardModal.
+ * Jamais inclui registros de Modo Simulação.
+ */
+export function listAuditedTalentSnapshotsForAdmin(options?: {
+  cloudRecords?: Array<Record<string, unknown>>;
+  includeCurrentSessionAudit?: boolean;
+  searchQuery?: string;
+  roleFilter?: 'all' | TalentParticipantRole;
+  sourceFilter?: 'all' | 'firestore_cloud' | 'local_audit_pending';
+  completionFilter?: 'all' | 'completed_all' | 'in_progress' | 'not_started';
+}): AuditedTalentAdminRecord[] {
+  const recordsMap = new Map<string, AuditedTalentAdminRecord>();
+  const nowIso = new Date().toISOString();
+  const clampInt = (val: unknown, min: number, max: number) => {
+    const num = Number(val);
+    return Math.max(min, Math.min(max, Math.round(Number.isFinite(num) ? num : min)));
+  };
+
+  // 1. Processa registros vindos diretamente da coleção /talent_progress no Firestore
+  const cloudRecords = Array.isArray(options?.cloudRecords) ? options.cloudRecords : [];
+  for (const docData of cloudRecords) {
+    if (!docData || docData.environmentMode !== 'production') continue;
+    const userId = String(docData.userId || docData.id || '').trim();
+    if (!userId) continue;
+    const role: TalentParticipantRole =
+      docData.role === 'colaborador' ? 'colaborador' : 'produtor_conteudo';
+
+    const canonicalPayload: TalentProgressFirestorePayload = {
+      userId,
+      role,
+      environmentMode: 'production',
+      approvedPublishedMediaCount: clampInt(docData.approvedPublishedMediaCount, 0, 1000000),
+      collaboratorVerifiedActionsCount: clampInt(
+        docData.collaboratorVerifiedActionsCount,
+        0,
+        1000000
+      ),
+      eligibleMutualAndChatInteractionsCount: clampInt(
+        docData.eligibleMutualAndChatInteractionsCount,
+        0,
+        1000000
+      ),
+      validLiveSessionsCount: clampInt(docData.validLiveSessionsCount, 0, 1000000),
+      weeklyActiveDaysCount: clampInt(docData.weeklyActiveDaysCount, 0, 7),
+      eligibleEngagementEventsCount: clampInt(docData.eligibleEngagementEventsCount, 0, 1000000),
+      pontosConquistados: clampInt(docData.pontosConquistados, 0, 1000000),
+      levelNumber: clampInt(docData.levelNumber, 1, 10),
+      desafiosConcluidosCount: clampInt(docData.desafiosConcluidosCount, 0, 5),
+    };
+
+    const recordKey = `cloud:${userId}:${role}`;
+    recordsMap.set(recordKey, {
+      ...canonicalPayload,
+      recordKey,
+      roleLabel: role === 'produtor_conteudo' ? 'Produtor de Conteúdo' : 'Colaborador & Indicador',
+      source: 'firestore_cloud',
+      sourceLabel: 'Firestore (Nuvem)',
+      cloudPersisted: true,
+      collectionPath: `/talent_progress/${userId}`,
+      updatedAtIso: normalizeTimestampIso(docData.updatedAt || docData.createdAt, nowIso),
+      schemaValidation: validateTalentProgressSnapshotSchema(canonicalPayload),
+      canonicalPayload,
+    });
+  }
+
+  // 2. Processa snapshots locais auditados em memória e na fila de produção
+  const pendingQueue = loadPendingLocalAuditQueue();
+  const combinedLocalEntries: Array<[string, TalentCloudSyncResult]> = [
+    ...Object.entries(pendingQueue),
+    ...Array.from(lastTalentSyncStateByUserAndRole.entries()),
+  ];
+
+  for (const [, syncResult] of combinedLocalEntries) {
+    if (!syncResult || !syncResult.payload) continue;
+    if (syncResult.payload.environmentMode !== 'production') continue;
+    const p = syncResult.payload;
+    const cloudKey = `cloud:${p.userId}:${p.role}`;
+    if (recordsMap.has(cloudKey)) continue;
+
+    const isCloud = syncResult.cloudPersisted || syncResult.status === 'synced_cloud';
+    const recordKey = `${isCloud ? 'cloud' : 'local'}:${p.userId}:${p.role}`;
+    recordsMap.set(recordKey, {
+      ...p,
+      recordKey,
+      roleLabel:
+        p.role === 'produtor_conteudo' ? 'Produtor de Conteúdo' : 'Colaborador & Indicador',
+      source: isCloud ? 'firestore_cloud' : 'local_audit_pending',
+      sourceLabel: isCloud ? 'Firestore (Nuvem)' : 'Auditoria Local (Pendente Login)',
+      cloudPersisted: isCloud,
+      collectionPath: syncResult.collectionPath || `/talent_progress/${p.userId}`,
+      updatedAtIso: syncResult.lastSyncedAtIso || nowIso,
+      schemaValidation: validateTalentProgressSnapshotSchema(p),
+      canonicalPayload: p,
+    });
+  }
+
+  // 3. Se solicitado (padrão no painel admin), garante apuração auditada da sessão ativa em produção
+  if (options?.includeCurrentSessionAudit !== false && recordsMap.size === 0) {
+    const activeUid = auth.currentUser?.uid || 'current_user';
+    for (const role of ['produtor_conteudo', 'colaborador'] as const) {
+      const payload = buildAuditedTalentFirestorePayload(activeUid, role, 'production');
+      const recordKey = `local:${payload.userId}:${role}`;
+      recordsMap.set(recordKey, {
+        ...payload,
+        recordKey,
+        roleLabel:
+          role === 'produtor_conteudo' ? 'Produtor de Conteúdo' : 'Colaborador & Indicador',
+        source: 'local_audit_pending',
+        sourceLabel: 'Auditoria Local (Sessão Atual)',
+        cloudPersisted: false,
+        collectionPath: `/talent_progress/${payload.userId}`,
+        updatedAtIso: nowIso,
+        schemaValidation: validateTalentProgressSnapshotSchema(payload),
+        canonicalPayload: payload,
+      });
+    }
+  }
+
+  let list = Array.from(recordsMap.values());
+
+  // Aplicação determinística dos filtros
+  const roleFilter = options?.roleFilter || 'all';
+  if (roleFilter !== 'all') {
+    list = list.filter((item) => item.role === roleFilter);
+  }
+
+  const sourceFilter = options?.sourceFilter || 'all';
+  if (sourceFilter !== 'all') {
+    list = list.filter((item) => item.source === sourceFilter);
+  }
+
+  const completionFilter = options?.completionFilter || 'all';
+  if (completionFilter === 'completed_all') {
+    list = list.filter((item) => item.desafiosConcluidosCount >= 5);
+  } else if (completionFilter === 'in_progress') {
+    list = list.filter(
+      (item) => item.desafiosConcluidosCount >= 1 && item.desafiosConcluidosCount < 5
+    );
+  } else if (completionFilter === 'not_started') {
+    list = list.filter((item) => item.desafiosConcluidosCount === 0);
+  }
+
+  const queryText = (options?.searchQuery || '').trim().toLowerCase();
+  if (queryText) {
+    list = list.filter(
+      (item) =>
+        item.userId.toLowerCase().includes(queryText) ||
+        item.roleLabel.toLowerCase().includes(queryText) ||
+        item.collectionPath.toLowerCase().includes(queryText) ||
+        item.sourceLabel.toLowerCase().includes(queryText)
+    );
+  }
+
+  return list.sort((a, b) => {
+    if (b.pontosConquistados !== a.pontosConquistados) {
+      return b.pontosConquistados - a.pontosConquistados;
+    }
+    return b.updatedAtIso.localeCompare(a.updatedAtIso);
+  });
+}
+
 
