@@ -37,10 +37,10 @@ Segurança:
 Apresente os arquivos relevantes, os riscos, as APIs do Google Maps necessárias e o menor plano de implementação. Aguarde autorização antes de alterar qualquer arquivo.
 
 
-
 #JOBS — Conectando pessoas, criando oportunidades
 
 Nascemos no Brasil e nossa visão é global.
+
 O JOBS é uma plataforma digital em desenvolvimento que reúne relacionamentos, descoberta de perfis, interação social, compartilhamento de conteúdo e experiências ao vivo em um único ecossistema.
 
 Nosso objetivo é construir uma experiência moderna, intuitiva e segura, oferecendo ferramentas para que usuários e criadores possam interagir, compartilhar conteúdos, descobrir oportunidades e explorar possibilidades de monetização.
@@ -76,7 +76,7 @@ As tecnologias, integrações e recursos efetivamente disponíveis devem ser con
 
 *Status do projeto
 
-Em desenvolvimento.
+"Em desenvolvimento"
 
 A publicação de uma versão não significa, por si só, que todas as funcionalidades estejam concluídas ou prontas para produção. Cada módulo deve ser validado por meio de inspeção do código, testes e verificações de segurança.
 
@@ -87,9 +87,10 @@ Construir um ecossistema digital que conecte pessoas, incentive a criação de c
 #JOBS — Conexões, conteúdo e oportunidades em um só lugar.
 
 
-1) Versão curta para apresentação
+1) Nossa Missão 
 
-JOBS é uma plataforma digital em desenvolvimento que conecta pessoas, conteúdos e oportunidades em um único ecossistema. A proposta combina redes sociais, descoberta de perfis, compartilhamento de fotos e vídeos, experiências ao vivo, monetização de criadores e gestão de interações em um ambiente moderno, intuitivo e seguro.
+JOBS é uma plataforma digital em desenvolvimento que conecta pessoas, conteúdos e oportunidades em um único ecossistema. 
+A proposta combina redes sociais, descoberta de perfis, porcompartilhamento de fotos e vídeos, experiências ao vivo, monetização de criadores e gestão de interações em um ambiente moderno, intuitivo e seguro.
 
 A plataforma foi pensada para facilitar conexões entre usuários, ampliar a visibilidade de criadores e oferecer experiências de engajamento, conteúdo premium e transações digitais com maior transparência e controle.
 
@@ -122,11 +123,10 @@ O JOBS prioriza proteção de dados, clareza nas cobranças, rastreabilidade fin
 
 O projeto está sendo desenvolvido com foco em arquitetura modular, integração segura e evolução contínua.
 
-## Status
-
+# Status
 Em desenvolvimento.
 
-## Visão de futuro
+# Visão de futuro
 
 Construir um ecossistema digital que conecte pessoas, incentive a criação de conteúdo e amplie oportunidades de interação com responsabilidade, transparência e potencial de expansão internacional.
 
