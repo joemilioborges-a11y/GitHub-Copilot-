@@ -346,6 +346,92 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "TalentProgressSnapshot": {
+      "title": "TalentProgressSnapshot",
+      "description": "Audited gamification and challenge progress snapshot for a JOBS participant in production mode, strictly isolated from financial ledger entries.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated UID of the participant.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["produtor_conteudo", "colaborador"],
+          "description": "Active participant perspective."
+        },
+        "environmentMode": {
+          "type": "string",
+          "enum": ["production"],
+          "description": "Must strictly be production; simulation snapshots are forbidden in Firestore."
+        },
+        "approvedPublishedMediaCount": {
+          "type": "number",
+          "description": "Audited count of published and approved media items."
+        },
+        "collaboratorVerifiedActionsCount": {
+          "type": "number",
+          "description": "Audited count of verified collaborator/referral actions."
+        },
+        "eligibleMutualAndChatInteractionsCount": {
+          "type": "number",
+          "description": "Audited count of mutual matches and eligible chat interactions."
+        },
+        "validLiveSessionsCount": {
+          "type": "number",
+          "description": "Audited count of valid live stream sessions."
+        },
+        "weeklyActiveDaysCount": {
+          "type": "number",
+          "description": "Audited count of distinct active days in the week (0 to 7)."
+        },
+        "eligibleEngagementEventsCount": {
+          "type": "number",
+          "description": "Audited count of eligible engagement events."
+        },
+        "pontosConquistados": {
+          "type": "number",
+          "description": "Gamification points earned from audited progress (non-monetary)."
+        },
+        "levelNumber": {
+          "type": "number",
+          "description": "Current gamification level (1 to 10)."
+        },
+        "desafiosConcluidosCount": {
+          "type": "number",
+          "description": "Number of completed challenges in the current cycle (0 to 5)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of initial snapshot creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last audited synchronization."
+        }
+      },
+      "required": [
+        "userId",
+        "role",
+        "environmentMode",
+        "approvedPublishedMediaCount",
+        "collaboratorVerifiedActionsCount",
+        "eligibleMutualAndChatInteractionsCount",
+        "validLiveSessionsCount",
+        "weeklyActiveDaysCount",
+        "eligibleEngagementEventsCount",
+        "pontosConquistados",
+        "levelNumber",
+        "desafiosConcluidosCount",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -368,6 +454,10 @@
     "/media_items/{mediaId}": {
       "schema": "ProtectedMediaItem",
       "description": "Creator media metadata with anti-self-approval moderation enforcement."
+    },
+    "/talent_progress/{userId}": {
+      "schema": "TalentProgressSnapshot",
+      "description": "Audited production gamification progress snapshot isolated from financial ledger entries."
     },
     "/test_audit/{docId}": {
       "schema": "TestAuditProbe",

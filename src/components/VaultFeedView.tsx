@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Profile, VipMediaItem, ProfileGender, ProfileSexualOrientation } from '../types';
 import { Lock, Unlock, Coins, Sparkles, Filter, Heart, Eye, RotateCcw } from 'lucide-react';
-import { protectedMediaService } from '../services/protectedMediaService';
+import { protectedMediaService, obfuscateUserIdForWatermark } from '../services/protectedMediaService';
+import { useSecureScreen } from '../services/screenSecurityService';
+import { authService } from '../utils/authService';
 
 interface VaultFeedViewProps {
   profiles: Profile[];
@@ -35,6 +37,9 @@ export const VaultFeedView: React.FC<VaultFeedViewProps> = ({
   });
 
   const isFilterActive = genderFilter !== 'todos' || orientationFilter !== 'todas' || filter !== 'all';
+  const currentUserId = authService.getCurrentSession()?.userId || 'current_user';
+  const hasUnlockedVisible = filteredItems.some(({ media }) => media.isUnlocked);
+  useSecureScreen(hasUnlockedVisible, 'vault_feed_grid');
 
   const handleResetFilters = () => {
     setGenderFilter('todos');
@@ -219,6 +224,16 @@ export const VaultFeedView: React.FC<VaultFeedViewProps> = ({
                       : 'filter blur-[18px] scale-110 brightness-80 group-hover:blur-[14px]'
                   }`}
                 />
+                {media.isUnlocked && (
+                  <div
+                    className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center opacity-20 select-none"
+                    aria-hidden="true"
+                  >
+                    <span className="transform -rotate-25 font-mono text-[10px] font-extrabold text-white tracking-widest">
+                      JOBS · {obfuscateUserIdForWatermark(currentUserId)}
+                    </span>
+                  </div>
+                )}
 
                 {/* Creator Chip overlay */}
                 <div className="absolute top-3 left-3 z-20 flex items-center gap-2 p-1.5 pr-3 rounded-full bg-black/70 backdrop-blur-md border border-white/10">

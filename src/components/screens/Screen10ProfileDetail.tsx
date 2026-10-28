@@ -27,8 +27,10 @@ import {
   formatDiamondsDisplay,
   PublicExclusiveMediaView,
 } from '../../services/exclusiveContentAndInterestService';
+import { protectedMediaService } from '../../services/protectedMediaService';
 import { authService } from '../../utils/authService';
 import { CreatorContentStudioModal, CreatorStudioTab } from '../CreatorContentStudioModal';
+import { ProtectedMediaViewer } from '../ProtectedMediaViewer';
 
 interface Screen10ProfileDetailProps {
   profile: Profile;
@@ -78,6 +80,8 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
     text: string;
   } | null>(null);
   const [activeSignedUrlByMediaId, setActiveSignedUrlByMediaId] = useState<Record<string, string>>({});
+  const [activeTokenIdByMediaId, setActiveTokenIdByMediaId] = useState<Record<string, string>>({});
+  const [activeViewerMediaItem, setActiveViewerMediaItem] = useState<PublicExclusiveMediaView | null>(null);
 
   const photos = profile.photos?.length ? profile.photos : [profile.avatar];
   const ai = calculateAiCompatibility(userProfile, profile);
@@ -188,6 +192,10 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
           ...prev,
           [mediaId]: res.delivery!.signedTemporaryUrl,
         }));
+        setActiveTokenIdByMediaId((prev) => ({
+          ...prev,
+          [mediaId]: res.delivery!.tokenId,
+        }));
         setFeedbackBanner({
           type: 'success',
           text:
@@ -242,6 +250,11 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
         ...prev,
         [item.id]: res.delivery!.signedTemporaryUrl,
       }));
+      setActiveTokenIdByMediaId((prev) => ({
+        ...prev,
+        [item.id]: res.delivery!.tokenId,
+      }));
+      setActiveViewerMediaItem(item);
       setFeedbackBanner({
         type: 'success',
         text: `Visualização protegida autorizada para "${item.caption}" (sem cobrança adicional).`,
@@ -252,6 +265,26 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
         text: res.reason,
       });
     }
+  };
+
+  const handleRenewSignedUrlForItem = (item: PublicExclusiveMediaView): string | undefined => {
+    const res = exclusiveContentAndInterestService.renewSignedMediaDelivery({
+      requesterUserId: currentUserId,
+      mediaId: item.id,
+      previousTokenId: activeTokenIdByMediaId[item.id],
+    });
+    if (res.allowed && res.delivery) {
+      setActiveSignedUrlByMediaId((prev) => ({
+        ...prev,
+        [item.id]: res.delivery!.signedTemporaryUrl,
+      }));
+      setActiveTokenIdByMediaId((prev) => ({
+        ...prev,
+        [item.id]: res.delivery!.tokenId,
+      }));
+      return res.delivery.signedTemporaryUrl;
+    }
+    return undefined;
   };
 
   const handleSendGift = async (giftId: string) => {
@@ -719,11 +752,23 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
                       key={item.id}
                       className="rounded-2xl overflow-hidden bg-[#11111c] border border-white/10 flex flex-col justify-between"
                     >
-                      <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
+                      <div
+                        className="relative aspect-[16/10] bg-slate-900 overflow-hidden select-none"
+                        onContextMenu={(e) => e.preventDefault()}
+                      >
                         <img
-                          src={item.safePreviewUrl}
+                          src={
+                            item.isUnlockedForViewer
+                              ? item.safePreviewUrl
+                              : protectedMediaService.getPublicTeaserUrl({
+                                  id: item.id,
+                                  title: item.caption,
+                                })
+                          }
                           alt={item.caption}
-                          className={`w-full h-full object-cover transition-all ${
+                          draggable={false}
+                          referrerPolicy="no-referrer"
+                          className={`w-full h-full object-cover pointer-events-none transition-all ${
                             item.isUnlockedForViewer ? '' : 'blur-md scale-105 brightness-75'
                           }`}
                         />
@@ -752,14 +797,23 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
                         </div>
 
                         {item.isUnlockedForViewer ? (
-                          <div className="p-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center justify-between">
-                            <span className="font-semibold flex items-center gap-1">
-                              <Unlock className="w-3.5 h-3.5" />
-                              Desbloqueado
-                            </span>
-                            <span className="font-mono text-[10px] truncate max-w-[140px]">
-                              {activeSignedUrlByMediaId[item.id] ? 'Token Assinado Ativo' : 'Acesso Confirmado'}
-                            </span>
+                          <div className="space-y-1.5">
+                            <div className="p-2 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center justify-between">
+                              <span className="font-semibold flex items-center gap-1">
+                                <Unlock className="w-3.5 h-3.5" />
+                                Desbloqueado
+                              </span>
+                              <span className="font-mono text-[10px] truncate max-w-[140px]">
+                                {activeSignedUrlByMediaId[item.id] ? 'Token Assinado Ativo' : 'Acesso Confirmado'}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleViewFreeOrUnlockedMedia(item)}
+                              className="w-full py-1.5 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 font-bold text-xs cursor-pointer"
+                            >
+                              Visualizar Mídia Protegida
+                            </button>
                           </div>
                         ) : (
                           <button
@@ -825,11 +879,23 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
                         key={item.id}
                         className="rounded-xl overflow-hidden border border-white/10 bg-slate-950 flex flex-col"
                       >
-                        <div className="relative aspect-[16/10] bg-slate-900 overflow-hidden">
+                        <div
+                          className="relative aspect-[16/10] bg-slate-900 overflow-hidden select-none"
+                          onContextMenu={(e) => e.preventDefault()}
+                        >
                           <img
-                            src={item.safePreviewUrl}
+                            src={
+                              item.isUnlockedForViewer
+                                ? item.safePreviewUrl
+                                : protectedMediaService.getPublicTeaserUrl({
+                                    id: item.id,
+                                    title: item.caption,
+                                  })
+                            }
                             alt={item.caption}
-                            className={`w-full h-full object-cover transition-all ${
+                            draggable={false}
+                            referrerPolicy="no-referrer"
+                            className={`w-full h-full object-cover pointer-events-none transition-all ${
                               item.isUnlockedForViewer ? '' : 'blur-lg scale-110 brightness-75'
                             }`}
                           />
@@ -850,6 +916,15 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
                             <span>Status: {item.isUnlockedForViewer ? 'Liberado' : 'Incluso no Cofre VIP'}</span>
                             <span>+18 Verificado</span>
                           </div>
+                          {item.isUnlockedForViewer && (
+                            <button
+                              type="button"
+                              onClick={() => handleViewFreeOrUnlockedMedia(item)}
+                              className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-[11px] cursor-pointer"
+                            >
+                              Visualizar no Player Protegido
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1177,6 +1252,61 @@ export const Screen10ProfileDetail: React.FC<Screen10ProfileDetailProps> = ({
           initialTab={creatorStudioInitialTab}
           onPublished={() => setRefreshTick((t) => t + 1)}
         />
+
+        {/* Modal de Visualização Protegida (Canvas + Marca-d'água Forense + FLAG_SECURE + Renovação de URL Assinada) */}
+        {activeViewerMediaItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/95 backdrop-blur-2xl overflow-y-auto">
+            <div className="relative w-full max-w-lg bg-[#12121a] border border-amber-500/40 rounded-3xl shadow-2xl overflow-hidden my-auto flex flex-col">
+              <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-[#0d0d14]">
+                <div>
+                  <h4 className="text-sm font-bold text-white line-clamp-1">
+                    {activeViewerMediaItem.caption}
+                  </h4>
+                  <p className="text-[11px] text-amber-300">
+                    Por {activeViewerMediaItem.creatorName} · Entrega Assinada Temporária (TTL 15 min)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveViewerMediaItem(null)}
+                  aria-label="Fechar Visualizador Protegido"
+                  className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="relative w-full bg-black">
+                <ProtectedMediaViewer
+                  media={{
+                    id: activeViewerMediaItem.id,
+                    title: activeViewerMediaItem.caption,
+                    description: activeViewerMediaItem.caption,
+                    mediaUrl: activeViewerMediaItem.safePreviewUrl,
+                    priceCredits: activeViewerMediaItem.priceDiamonds,
+                    type: activeViewerMediaItem.mediaType,
+                    isUnlocked: activeViewerMediaItem.isUnlockedForViewer,
+                    likesCount: 0,
+                    unlockCount: activeViewerMediaItem.unlockCount,
+                  }}
+                  creatorName={activeViewerMediaItem.creatorName}
+                  isUnlocked={activeViewerMediaItem.isUnlockedForViewer}
+                  isFreeContent={activeViewerMediaItem.modality === 'FREE'}
+                  preIssuedSignedUrl={activeSignedUrlByMediaId[activeViewerMediaItem.id]}
+                  currentUserId={currentUserId}
+                  aspectRatio="3/4"
+                  onRenewSignedUrl={() => handleRenewSignedUrlForItem(activeViewerMediaItem)}
+                  showWatermark={true}
+                />
+              </div>
+
+              <div className="p-3.5 bg-[#0d0d14] border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+                <span>Cache-Control: private, no-store, no-cache</span>
+                <span className="text-emerald-400 font-mono">FLAG_SECURE + Marca-d’água Ativos</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

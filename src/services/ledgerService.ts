@@ -189,6 +189,69 @@ export interface CreatorBalanceSummary {
   tipsReceivedCount: number;
 }
 
+export type WalletOriginCategory = 'collaborator' | 'content_producer';
+
+export type WalletStatementCategoryFilter =
+  | 'all'
+  | 'collaborator'
+  | 'content_producer'
+  | 'payout'
+  | 'refund';
+
+export type PixKeyType = 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'RANDOM';
+
+export interface UnifiedWalletSummary {
+  userId: string;
+  environment: PayoutEnvironment;
+  isSimulation: boolean;
+  currency: 'BRL';
+  availableBalanceCents: number;
+  availableBalanceBrl: number;
+  totalReceivedPeriodCents: number;
+  totalReceivedPeriodBrl: number;
+  collaboratorReceivedCents: number;
+  collaboratorReceivedBrl: number;
+  collaboratorPendingCents: number;
+  collaboratorPendingBrl: number;
+  contentProducerReceivedCents: number;
+  contentProducerReceivedBrl: number;
+  contentProducerPendingCents: number;
+  contentProducerPendingBrl: number;
+  pendingReviewCents: number;
+  pendingReviewBrl: number;
+  payoutReservedCents: number;
+  payoutReservedBrl: number;
+  withdrawnSettledCents: number;
+  withdrawnSettledBrl: number;
+  minimumWithdrawalCents: number;
+  minimumWithdrawalBrl: number;
+  maximumDailyWithdrawalCents: number;
+  maximumDailyWithdrawalBrl: number;
+  verifiedPixFeeCents: number;
+  verifiedPixFeeBrl: number;
+  estimatedSettlementSla: string;
+  userConsumptionCredits: number;
+  lastUpdatedIso: string;
+}
+
+export interface UnifiedWalletStatementItem {
+  id: string;
+  transactionId: string;
+  timestamp: string;
+  description: string;
+  category: 'collaborator' | 'content_producer' | 'payout' | 'refund';
+  categoryLabel: string;
+  subTypeLabel: string;
+  direction: 'credit' | 'debit';
+  amountCents: number;
+  amountBrl: number;
+  status: 'available' | 'pending_review' | 'payout_reserved' | 'payout_released' | 'refunded';
+  statusLabel: string;
+  idempotencyKeyMasked: string;
+  sha256ReferenceHash?: string;
+  isSandbox: boolean;
+}
+
 export interface LiveUnlockAuditTransaction {
   transactionId: string;
   timestamp: string;
@@ -2540,31 +2603,33 @@ class FinancialLedgerService {
         throw new Error(`Transição de estado inválida: Não é permitido transicionar de '${payout.status}' para 'approved'.`);
       }
 
-      // Reserva Atômica no Livro-Razão (CREATOR_AVAILABLE_BRL -> CREATOR_PAYOUT_ESCROW)
-      const txRes = await this._postTransactionAtomicDirect({
-        idempotencyKey: params.idempotencyKey,
-        description: `[PAYOUT APROVADO] Reserva de fundos para repasse de ${payout.creatorName}`,
-        actorId: params.adminId,
-        entries: [
-          {
-            operationType: 'PAYOUT_RESERVE',
-            debitAccount: `CREATOR_AVAILABLE_BRL:${payout.creatorId}`,
-            creditAccount: `CREATOR_PAYOUT_ESCROW:${payout.creatorId}`,
-            amount: payout.amountBrl,
-            amountCents: payout.amountCents,
-            currency: 'BRL',
-            targetCreatorId: payout.creatorId,
-            referenceId: payout.id,
-            description: `Reserva contábil de repasse #${payout.id}`,
-          },
-        ],
-      });
+      // Reserva Atômica no Livro-Razão (CREATOR_AVAILABLE_BRL -> CREATOR_PAYOUT_ESCROW) se ainda não reservado na solicitação
+      if (!payout.ledgerEntryId) {
+        const txRes = await this._postTransactionAtomicDirect({
+          idempotencyKey: params.idempotencyKey,
+          description: `[PAYOUT APROVADO] Reserva de fundos para repasse de ${payout.creatorName}`,
+          actorId: params.adminId,
+          entries: [
+            {
+              operationType: 'PAYOUT_RESERVE',
+              debitAccount: `CREATOR_AVAILABLE_BRL:${payout.creatorId}`,
+              creditAccount: `CREATOR_PAYOUT_ESCROW:${payout.creatorId}`,
+              amount: payout.amountBrl,
+              amountCents: payout.amountCents,
+              currency: 'BRL',
+              targetCreatorId: payout.creatorId,
+              referenceId: payout.id,
+              description: `Reserva contábil de repasse #${payout.id}`,
+            },
+          ],
+        });
+        payout.transactionId = txRes.entries[0]?.transactionId;
+        payout.ledgerEntryId = txRes.entries[0]?.id;
+      }
 
       payout.status = 'approved';
       payout.updatedAt = new Date().toISOString();
       payout.approvedAt = payout.updatedAt;
-      payout.transactionId = txRes.entries[0]?.transactionId;
-      payout.ledgerEntryId = txRes.entries[0]?.id;
       payout.auditTrail.push({
         timestamp: payout.updatedAt,
         fromStatus: 'under_review',
@@ -2726,8 +2791,8 @@ class FinancialLedgerService {
 
       const previousStatus = payout.status;
 
-      // Lançamento Compensatório se os fundos estavam em Escrow
-      if (previousStatus === 'approved' && payout.environment === 'production') {
+      // Lançamento Compensatório se os fundos estavam reservados em Escrow
+      if ((previousStatus === 'approved' && payout.environment === 'production') || Boolean(payout.ledgerEntryId)) {
         await this._postTransactionAtomicDirect({
           idempotencyKey: params.idempotencyKey,
           description: `[ESTORNO COMPENSATÓRIO] Devolução de saldo de repasse cancelado #${payout.id}`,
@@ -2810,6 +2875,923 @@ class FinancialLedgerService {
       purchasesOverride: [],
     });
   }
+
+  // =========================================================================
+  // MINHA CARTEIRA UNIFICADA (COLABORADORES + PRODUTORES DE CONTEÚDO + SAQUE)
+  // =========================================================================
+
+  /**
+   * Inicializa lançamentos auditados em Sandbox para 'current_user' caso ainda não existam,
+   * permitindo visualizar imediatamente na Tela Inicial a composição entre Colaboradores e
+   * Produtores de Conteúdo. Nunca executa em ambiente de Produção nem para IDs de teste.
+   */
+  public ensureUnifiedWalletSandboxSeeds(userId: string = 'current_user'): void {
+    if (userId !== 'current_user') return;
+    if (!runtimeEnvironmentService.shouldSeedSyntheticData()) return;
+
+    const entries = this.getEntries();
+    const alreadySeeded = entries.some(
+      (e) =>
+        e.idempotencyKey.startsWith('idemp_wallet_home_seed_') ||
+        (e.metadata && (e.metadata as Record<string, unknown>).isUnifiedWalletSeed === true)
+    );
+    if (alreadySeeded) return;
+
+    const now = Date.now();
+    const hourMs = 3600000;
+    const seeds: Array<{
+      id: string;
+      idemp: string;
+      txId: string;
+      offsetMs: number;
+      operationType: LedgerOperationType;
+      debitAccount: string;
+      creditAccount: string;
+      amountCents: number;
+      description: string;
+      originCategory: WalletOriginCategory;
+      subTypeLabel: string;
+    }> = [
+      {
+        id: 'ledg_wallet_seed_collab_01',
+        idemp: 'idemp_wallet_home_seed_collab_01',
+        txId: 'tx_wallet_seed_collab_01',
+        offsetMs: 72 * hourMs,
+        operationType: 'PERFORMANCE_REWARD',
+        debitAccount: 'CAMPAIGN_REWARD_ESCROW:collaborators',
+        creditAccount: 'CREATOR_AVAILABLE_BRL:current_user',
+        amountCents: 4500, // R$ 45,00
+        description: 'Comissão de Colaborador: 3 Indicações Verificadas Ativas (Nível 1)',
+        originCategory: 'collaborator',
+        subTypeLabel: 'Indicação Verificada',
+      },
+      {
+        id: 'ledg_wallet_seed_collab_02',
+        idemp: 'idemp_wallet_home_seed_collab_02',
+        txId: 'tx_wallet_seed_collab_02',
+        offsetMs: 48 * hourMs,
+        operationType: 'PERFORMANCE_REWARD',
+        debitAccount: 'CAMPAIGN_REWARD_ESCROW:challenges',
+        creditAccount: 'CREATOR_AVAILABLE_BRL:current_user',
+        amountCents: 3500, // R$ 35,00
+        description: 'Meta Conquistada: Desafio Semanal de Engajamento e Compartilhamento',
+        originCategory: 'collaborator',
+        subTypeLabel: 'Meta de Desafio',
+      },
+      {
+        id: 'ledg_wallet_seed_collab_03',
+        idemp: 'idemp_wallet_home_seed_collab_03',
+        txId: 'tx_wallet_seed_collab_03',
+        offsetMs: 26 * hourMs,
+        operationType: 'PERFORMANCE_REWARD',
+        debitAccount: 'CAMPAIGN_REWARD_ESCROW:collaborators',
+        creditAccount: 'CREATOR_AVAILABLE_BRL:current_user',
+        amountCents: 2500, // R$ 25,00
+        description: 'Bônus de Colaborador: Meta Diária de Convites Qualificados',
+        originCategory: 'collaborator',
+        subTypeLabel: 'Bônus de Rede',
+      },
+      {
+        id: 'ledg_wallet_seed_prod_01',
+        idemp: 'idemp_wallet_home_seed_prod_01',
+        txId: 'tx_wallet_seed_prod_01',
+        offsetMs: 60 * hourMs,
+        operationType: 'CREATOR_REVENUE_SHARE',
+        debitAccount: 'ESCROW_PAYMENT_GATEWAY',
+        creditAccount: 'CREATOR_AVAILABLE_BRL:current_user',
+        amountCents: 10430, // R$ 104,30
+        description: '[70% Repasse Produtor] Desbloqueios do Cofre VIP e Álbum Exclusivo',
+        originCategory: 'content_producer',
+        subTypeLabel: 'Cofre VIP & Álbuns (70%)',
+      },
+      {
+        id: 'ledg_wallet_seed_prod_02',
+        idemp: 'idemp_wallet_home_seed_prod_02',
+        txId: 'tx_wallet_seed_prod_02',
+        offsetMs: 36 * hourMs,
+        operationType: 'CREATOR_REVENUE_SHARE',
+        debitAccount: 'ESCROW_PAYMENT_GATEWAY',
+        creditAccount: 'CREATOR_AVAILABLE_BRL:current_user',
+        amountCents: 7350, // R$ 73,50
+        description: '[70% Repasse Produtor] Presentes Virtuais em Transmissão Ao Vivo',
+        originCategory: 'content_producer',
+        subTypeLabel: 'Presentes em Live (70%)',
+      },
+      {
+        id: 'ledg_wallet_seed_prod_03',
+        idemp: 'idemp_wallet_home_seed_prod_03',
+        txId: 'tx_wallet_seed_prod_03',
+        offsetMs: 14 * hourMs,
+        operationType: 'CREATOR_REVENUE_SHARE',
+        debitAccount: 'ESCROW_PAYMENT_GATEWAY',
+        creditAccount: 'CREATOR_AVAILABLE_BRL:current_user',
+        amountCents: 6220, // R$ 62,20
+        description: '[70% Repasse Produtor] Desbloqueio Avulso de Fotos e Vídeos Protegidos',
+        originCategory: 'content_producer',
+        subTypeLabel: 'Mídias Exclusivas (70%)',
+      },
+      {
+        id: 'ledg_wallet_seed_pend_prod_04',
+        idemp: 'idemp_wallet_home_seed_pend_prod_04',
+        txId: 'tx_wallet_seed_pend_prod_04',
+        offsetMs: 4 * hourMs,
+        operationType: 'CREATOR_REVENUE_SHARE',
+        debitAccount: 'ESCROW_PAYMENT_GATEWAY',
+        creditAccount: 'CREATOR_PENDING_BRL:current_user',
+        amountCents: 3430, // R$ 34,30
+        description: '[Em Retenção D+14] Desbloqueio de Vídeo Exclusivo HD (70% Criador)',
+        originCategory: 'content_producer',
+        subTypeLabel: 'Retenção Antifraude',
+      },
+      {
+        id: 'ledg_wallet_seed_pend_collab_05',
+        idemp: 'idemp_wallet_home_seed_pend_collab_05',
+        txId: 'tx_wallet_seed_pend_collab_05',
+        offsetMs: 2 * hourMs,
+        operationType: 'PERFORMANCE_REWARD',
+        debitAccount: 'CAMPAIGN_REWARD_ESCROW:collaborators',
+        creditAccount: 'CREATOR_PENDING_BRL:current_user',
+        amountCents: 1500, // R$ 15,00
+        description: '[Em Validação] Bônus de Indicação de Novo Assinante Premium',
+        originCategory: 'collaborator',
+        subTypeLabel: 'Validação de Indicação',
+      },
+    ];
+
+    let previousHash = entries[0] ? entries[0].entryHash : '0x0000000000000000';
+    const seededEntries: LedgerEntry[] = [];
+
+    for (const s of seeds) {
+      const timestamp = new Date(now - s.offsetMs).toISOString();
+      const amount = Number((s.amountCents / 100).toFixed(2));
+      const rawSign = `${s.id}:${s.idemp}:${timestamp}:${amount}:BRL:${previousHash}`;
+      const entryHash = computeSha256Simulated(rawSign);
+
+      const entry: LedgerEntry = {
+        id: s.id,
+        idempotencyKey: s.idemp,
+        transactionId: s.txId,
+        timestamp,
+        operationType: s.operationType,
+        debitAccount: s.debitAccount,
+        creditAccount: s.creditAccount,
+        amount,
+        amountCents: s.amountCents,
+        currency: 'BRL',
+        status: 'posted',
+        actorId: 'system_wallet_auditor',
+        targetCreatorId: userId,
+        referenceId: s.txId,
+        description: s.description,
+        isSandbox: true,
+        previousHash,
+        entryHash,
+        sha256ProtocolVersion: LEDGER_SHA256_PROTOCOL_VERSION,
+        metadata: {
+          isUnifiedWalletSeed: true,
+          originCategory: s.originCategory,
+          subTypeLabel: s.subTypeLabel,
+        },
+      };
+
+      const { sha256Hash } = calculateLedgerSha256(entry);
+      entry.sha256ReferenceHash = sha256Hash;
+      if (entry.metadata) {
+        entry.metadata.sha256ReferenceHash = sha256Hash;
+      }
+
+      seededEntries.unshift(entry);
+      previousHash = entryHash;
+    }
+
+    this.saveEntries([...seededEntries, ...entries]);
+  }
+
+  /**
+   * Classifica deterministicamente a origem de um lançamento contábil BRL:
+   * - 'collaborator': indicações verificadas, comissões de rede e metas de desafios
+   * - 'content_producer': mídias exclusivas, Cofre VIP, assinaturas e presentes em lives
+   */
+  public classifyWalletEntryOrigin(entry: LedgerEntry): WalletOriginCategory {
+    const metaCategory = entry.metadata?.originCategory as string | undefined;
+    if (metaCategory === 'collaborator') return 'collaborator';
+    if (metaCategory === 'content_producer') return 'content_producer';
+
+    if (
+      entry.operationType === 'CREATOR_REVENUE_SHARE' ||
+      entry.operationType === 'CONTENT_UNLOCK' ||
+      entry.operationType === 'TIP_GIFT' ||
+      entry.operationType === 'SUBSCRIPTION_PURCHASE'
+    ) {
+      return 'content_producer';
+    }
+
+    if (entry.operationType === 'PERFORMANCE_REWARD') {
+      const descLower = (entry.description || '').toLowerCase();
+      if (
+        descLower.includes('mídia') ||
+        descLower.includes('cofre') ||
+        descLower.includes('conteúdo')
+      ) {
+        return 'content_producer';
+      }
+      return 'collaborator';
+    }
+
+    const descLower = (entry.description || '').toLowerCase();
+    if (
+      descLower.includes('indica') ||
+      descLower.includes('colaborador') ||
+      descLower.includes('afiliad') ||
+      descLower.includes('desafio') ||
+      descLower.includes('meta')
+    ) {
+      return 'collaborator';
+    }
+
+    return 'content_producer';
+  }
+
+  /**
+   * Registra de forma atômica e idempotente um recebimento de Colaborador
+   * (Indicação verificada, comissão de rede ou conquista de meta de desafio).
+   */
+  public async recordCollaboratorEarningAtomic(params: {
+    userId: string;
+    amountCents: number;
+    subType: 'referral' | 'challenge_goal' | 'engagement_milestone';
+    title: string;
+    referenceId: string;
+    idempotencyKey: string;
+    isPendingReview?: boolean;
+  }): Promise<{
+    success: boolean;
+    amountCents: number;
+    amountBrl: number;
+    isReplay: boolean;
+    entry: LedgerEntry;
+  }> {
+    if (!params.userId || !params.userId.trim()) {
+      throw new Error('Identificador de usuário obrigatório para registrar ganho de colaborador.');
+    }
+    if (!Number.isInteger(params.amountCents) || params.amountCents <= 0) {
+      throw new Error('Valor em centavos inválido: deve ser um inteiro estritamente positivo.');
+    }
+
+    const amountBrl = Number((params.amountCents / 100).toFixed(2));
+    const targetAccount = params.isPendingReview
+      ? `CREATOR_PENDING_BRL:${params.userId}`
+      : `CREATOR_AVAILABLE_BRL:${params.userId}`;
+
+    const subTypeLabel =
+      params.subType === 'referral'
+        ? 'Indicação Verificada'
+        : params.subType === 'challenge_goal'
+        ? 'Meta de Desafio'
+        : 'Marco de Engajamento';
+
+    const res = await this.postEntry({
+      idempotencyKey: params.idempotencyKey,
+      operationType: 'PERFORMANCE_REWARD',
+      debitAccount: 'CAMPAIGN_REWARD_ESCROW:collaborators',
+      creditAccount: targetAccount,
+      amount: amountBrl,
+      amountCents: params.amountCents,
+      currency: 'BRL',
+      actorId: params.userId,
+      targetCreatorId: params.userId,
+      referenceId: params.referenceId,
+      description: `[Colaborador · ${subTypeLabel}] ${params.title}`,
+      metadata: {
+        originCategory: 'collaborator',
+        rewardSubType: params.subType,
+        subTypeLabel,
+        isPendingReview: Boolean(params.isPendingReview),
+      },
+    });
+
+    return {
+      success: true,
+      amountCents: params.amountCents,
+      amountBrl,
+      isReplay: res.isReplay,
+      entry: res.entry,
+    };
+  }
+
+  /**
+   * Registra de forma atômica e idempotente um recebimento líquido de Produtor de Conteúdo
+   * (Desbloqueio de foto/vídeo protegido, Cofre VIP ou presente em Live).
+   */
+  public async recordContentProducerEarningAtomic(params: {
+    userId: string;
+    amountCents: number;
+    subType: 'media_unlock' | 'vip_vault' | 'live_gift';
+    title: string;
+    referenceId: string;
+    idempotencyKey: string;
+    isPendingReview?: boolean;
+  }): Promise<{
+    success: boolean;
+    amountCents: number;
+    amountBrl: number;
+    isReplay: boolean;
+    entry: LedgerEntry;
+  }> {
+    if (!params.userId || !params.userId.trim()) {
+      throw new Error('Identificador de usuário obrigatório para registrar ganho de produtor.');
+    }
+    if (!Number.isInteger(params.amountCents) || params.amountCents <= 0) {
+      throw new Error('Valor em centavos inválido: deve ser um inteiro estritamente positivo.');
+    }
+
+    const amountBrl = Number((params.amountCents / 100).toFixed(2));
+    const targetAccount = params.isPendingReview
+      ? `CREATOR_PENDING_BRL:${params.userId}`
+      : `CREATOR_AVAILABLE_BRL:${params.userId}`;
+
+    const subTypeLabel =
+      params.subType === 'vip_vault'
+        ? 'Cofre VIP (70%)'
+        : params.subType === 'live_gift'
+        ? 'Presente em Live (70%)'
+        : 'Mídia Exclusiva (70%)';
+
+    const res = await this.postEntry({
+      idempotencyKey: params.idempotencyKey,
+      operationType: 'CREATOR_REVENUE_SHARE',
+      debitAccount: 'ESCROW_PAYMENT_GATEWAY',
+      creditAccount: targetAccount,
+      amount: amountBrl,
+      amountCents: params.amountCents,
+      currency: 'BRL',
+      actorId: params.userId,
+      targetCreatorId: params.userId,
+      referenceId: params.referenceId,
+      description: `[Produtor · ${subTypeLabel}] ${params.title}`,
+      metadata: {
+        originCategory: 'content_producer',
+        producerSubType: params.subType,
+        subTypeLabel,
+        isPendingReview: Boolean(params.isPendingReview),
+      },
+    });
+
+    return {
+      success: true,
+      amountCents: params.amountCents,
+      amountBrl,
+      isReplay: res.isReplay,
+      entry: res.entry,
+    };
+  }
+
+  /**
+   * Consolida os indicadores da "Minha Carteira" na Tela Inicial diretamente a partir
+   * do livro-razão contábil, separando estritamente:
+   * - Saldo disponível para saque (BRL)
+   * - Valores recebidos de colaboradores (BRL)
+   * - Valores recebidos de produtores de conteúdo (BRL)
+   * - Valores pendentes/em análise (BRL) e reservados em saque (BRL)
+   * - Créditos virtuais de consumo (CREDITS - não sacáveis)
+   */
+  public getUnifiedWalletSummary(userId: string = 'current_user'): UnifiedWalletSummary {
+    if (userId === 'current_user') {
+      this.ensureUnifiedWalletSandboxSeeds('current_user');
+    }
+
+    const entries = this.getEntries();
+    const isSim = runtimeEnvironmentService.isSimulationMode();
+    const env: PayoutEnvironment = isSim ? 'sandbox' : 'production';
+
+    const availAccount = `CREATOR_AVAILABLE_BRL:${userId}`;
+    const pendingAccount = `CREATOR_PENDING_BRL:${userId}`;
+    const escrowAccount = `CREATOR_PAYOUT_ESCROW:${userId}`;
+
+    let availableBalanceCents = 0;
+    let collaboratorReceivedCents = 0;
+    let collaboratorPendingCents = 0;
+    let contentProducerReceivedCents = 0;
+    let contentProducerPendingCents = 0;
+    let pendingReviewCents = 0;
+    let payoutReservedCents = 0;
+    let withdrawnSettledCents = 0;
+
+    for (const entry of entries) {
+      if (entry.currency !== 'BRL') continue;
+      if (entry.status !== 'posted' && entry.status !== 'refunded') continue;
+
+      const cents =
+        typeof entry.amountCents === 'number'
+          ? Math.round(entry.amountCents)
+          : Math.round(entry.amount * 100);
+
+      // Créditos na conta de saldo disponível para saque
+      if (entry.creditAccount === availAccount) {
+        availableBalanceCents += cents;
+        if (entry.operationType !== 'PAYOUT_REVERSAL' && entry.status === 'posted') {
+          const origin = this.classifyWalletEntryOrigin(entry);
+          if (origin === 'collaborator') {
+            collaboratorReceivedCents += cents;
+          } else {
+            contentProducerReceivedCents += cents;
+          }
+        }
+      }
+
+      // Débitos na conta de saldo disponível para saque
+      if (entry.debitAccount === availAccount) {
+        availableBalanceCents -= cents;
+        if (entry.operationType === 'REFUND' || entry.operationType === 'ADMIN_ADJUSTMENT') {
+          const origin = this.classifyWalletEntryOrigin(entry);
+          if (origin === 'collaborator') {
+            collaboratorReceivedCents = Math.max(0, collaboratorReceivedCents - cents);
+          } else {
+            contentProducerReceivedCents = Math.max(0, contentProducerReceivedCents - cents);
+          }
+        }
+      }
+
+      // Conta pendente / em análise antifraude (retenção D+14)
+      if (entry.creditAccount === pendingAccount && entry.status === 'posted') {
+        pendingReviewCents += cents;
+        const origin = this.classifyWalletEntryOrigin(entry);
+        if (origin === 'collaborator') {
+          collaboratorPendingCents += cents;
+        } else {
+          contentProducerPendingCents += cents;
+        }
+      }
+      if (entry.debitAccount === pendingAccount) {
+        pendingReviewCents -= cents;
+        const origin = this.classifyWalletEntryOrigin(entry);
+        if (origin === 'collaborator') {
+          collaboratorPendingCents = Math.max(0, collaboratorPendingCents - cents);
+        } else {
+          contentProducerPendingCents = Math.max(0, contentProducerPendingCents - cents);
+        }
+      }
+
+      // Conta de reserva de saque (Escrow de Payout)
+      if (entry.creditAccount === escrowAccount) {
+        payoutReservedCents += cents;
+      }
+      if (entry.debitAccount === escrowAccount) {
+        payoutReservedCents -= cents;
+        if (entry.operationType === 'PAYOUT_SETTLED') {
+          withdrawnSettledCents += cents;
+        }
+      }
+    }
+
+    const safeAvailableCents = Math.max(0, availableBalanceCents);
+    const safeCollaboratorCents = Math.max(0, collaboratorReceivedCents);
+    const safeProducerCents = Math.max(0, contentProducerReceivedCents);
+    const safePendingCents = Math.max(0, pendingReviewCents);
+    const safePayoutReservedCents = Math.max(0, payoutReservedCents);
+    const safeWithdrawnSettledCents = Math.max(0, withdrawnSettledCents);
+    const totalReceivedPeriodCents = safeCollaboratorCents + safeProducerCents;
+
+    const minimumWithdrawalCents = 5000; // R$ 50,00
+    const maximumDailyWithdrawalCents = 1000000; // R$ 10.000,00
+    const verifiedPixFeeCents = 0; // Tarifa zero para PIX verificado
+
+    return {
+      userId,
+      environment: env,
+      isSimulation: isSim,
+      currency: 'BRL',
+      availableBalanceCents: safeAvailableCents,
+      availableBalanceBrl: Number((safeAvailableCents / 100).toFixed(2)),
+      totalReceivedPeriodCents,
+      totalReceivedPeriodBrl: Number((totalReceivedPeriodCents / 100).toFixed(2)),
+      collaboratorReceivedCents: safeCollaboratorCents,
+      collaboratorReceivedBrl: Number((safeCollaboratorCents / 100).toFixed(2)),
+      collaboratorPendingCents: Math.max(0, collaboratorPendingCents),
+      collaboratorPendingBrl: Number((Math.max(0, collaboratorPendingCents) / 100).toFixed(2)),
+      contentProducerReceivedCents: safeProducerCents,
+      contentProducerReceivedBrl: Number((safeProducerCents / 100).toFixed(2)),
+      contentProducerPendingCents: Math.max(0, contentProducerPendingCents),
+      contentProducerPendingBrl: Number((Math.max(0, contentProducerPendingCents) / 100).toFixed(2)),
+      pendingReviewCents: safePendingCents,
+      pendingReviewBrl: Number((safePendingCents / 100).toFixed(2)),
+      payoutReservedCents: safePayoutReservedCents,
+      payoutReservedBrl: Number((safePayoutReservedCents / 100).toFixed(2)),
+      withdrawnSettledCents: safeWithdrawnSettledCents,
+      withdrawnSettledBrl: Number((safeWithdrawnSettledCents / 100).toFixed(2)),
+      minimumWithdrawalCents,
+      minimumWithdrawalBrl: 50.0,
+      maximumDailyWithdrawalCents,
+      maximumDailyWithdrawalBrl: 10000.0,
+      verifiedPixFeeCents,
+      verifiedPixFeeBrl: 0.0,
+      estimatedSettlementSla: 'Até 1 dia útil após validação antifraude',
+      userConsumptionCredits: this.getUserCredits(userId),
+      lastUpdatedIso: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Retorna o extrato detalhado da "Minha Carteira" com classificação auditável
+   * por origem (Colaboradores, Produtores de Conteúdo, Saques e Estornos).
+   */
+  public getUnifiedWalletStatement(
+    userId: string = 'current_user',
+    categoryFilter: WalletStatementCategoryFilter = 'all'
+  ): UnifiedWalletStatementItem[] {
+    if (userId === 'current_user') {
+      this.ensureUnifiedWalletSandboxSeeds('current_user');
+    }
+
+    const entries = this.getEntries();
+    const availAccount = `CREATOR_AVAILABLE_BRL:${userId}`;
+    const pendingAccount = `CREATOR_PENDING_BRL:${userId}`;
+    const escrowAccount = `CREATOR_PAYOUT_ESCROW:${userId}`;
+
+    const items: UnifiedWalletStatementItem[] = [];
+
+    for (const entry of entries) {
+      if (entry.currency !== 'BRL') continue;
+
+      const isUserRelated =
+        entry.creditAccount === availAccount ||
+        entry.debitAccount === availAccount ||
+        entry.creditAccount === pendingAccount ||
+        entry.debitAccount === pendingAccount ||
+        entry.creditAccount === escrowAccount ||
+        entry.debitAccount === escrowAccount;
+
+      if (!isUserRelated) continue;
+
+      const cents =
+        typeof entry.amountCents === 'number'
+          ? Math.round(entry.amountCents)
+          : Math.round(entry.amount * 100);
+      const amountBrl = Number((cents / 100).toFixed(2));
+
+      let category: 'collaborator' | 'content_producer' | 'payout' | 'refund' = 'content_producer';
+      let categoryLabel = 'Produtor de Conteúdo';
+      let subTypeLabel = (entry.metadata?.subTypeLabel as string) || 'Repasse 70%';
+      let direction: 'credit' | 'debit' = 'credit';
+      let status: UnifiedWalletStatementItem['status'] = 'available';
+      let statusLabel = 'Disponível para Saque';
+
+      if (
+        entry.operationType === 'PAYOUT_RESERVE' ||
+        entry.operationType === 'PAYOUT_SETTLED' ||
+        entry.operationType === 'PAYOUT_REVERSAL'
+      ) {
+        category = 'payout';
+        categoryLabel = 'Saque / Transferência';
+        if (entry.operationType === 'PAYOUT_RESERVE') {
+          direction = 'debit';
+          status = 'payout_reserved';
+          statusLabel = 'Em Análise / Reservado';
+          subTypeLabel = 'Solicitação de Saque PIX';
+        } else if (entry.operationType === 'PAYOUT_SETTLED') {
+          direction = 'debit';
+          status = 'payout_released';
+          statusLabel = 'Saque Liquidado';
+          subTypeLabel = 'Liquidação Bancária PIX';
+        } else {
+          direction = 'credit';
+          status = 'available';
+          statusLabel = 'Estorno de Saque Devolvido';
+          subTypeLabel = 'Devolução ao Saldo Disponível';
+        }
+      } else if (entry.operationType === 'REFUND' || entry.status === 'refunded') {
+        category = 'refund';
+        categoryLabel = 'Estorno Contábil';
+        direction = entry.debitAccount === availAccount || entry.debitAccount === pendingAccount ? 'debit' : 'credit';
+        status = 'refunded';
+        statusLabel = 'Estornado';
+        subTypeLabel = 'Ajuste / Estorno';
+      } else {
+        const origin = this.classifyWalletEntryOrigin(entry);
+        category = origin;
+        categoryLabel = origin === 'collaborator' ? 'Colaborador' : 'Produtor de Conteúdo';
+        if (!entry.metadata?.subTypeLabel) {
+          subTypeLabel =
+            origin === 'collaborator'
+              ? 'Indicações & Desafios'
+              : 'Mídias Exclusivas & Lives (70%)';
+        }
+        direction =
+          entry.creditAccount === availAccount || entry.creditAccount === pendingAccount
+            ? 'credit'
+            : 'debit';
+
+        if (entry.creditAccount === pendingAccount) {
+          status = 'pending_review';
+          statusLabel = 'Em Retenção / Análise';
+        } else {
+          status = 'available';
+          statusLabel = 'Disponível para Saque';
+        }
+      }
+
+      if (categoryFilter !== 'all' && category !== categoryFilter) {
+        continue;
+      }
+
+      items.push({
+        id: entry.id,
+        transactionId: entry.transactionId || entry.id,
+        timestamp: entry.timestamp,
+        description: entry.description,
+        category,
+        categoryLabel,
+        subTypeLabel,
+        direction,
+        amountCents: cents,
+        amountBrl,
+        status,
+        statusLabel,
+        idempotencyKeyMasked: maskIdempotencyKey(entry.idempotencyKey),
+        sha256ReferenceHash: entry.sha256ReferenceHash || entry.entryHash,
+        isSandbox: entry.isSandbox,
+      });
+    }
+
+    return items;
+  }
+
+  /**
+   * Valida formato de chave PIX para prevenção de falhas operacionais no saque.
+   */
+  public validatePixDestination(pixKeyType: PixKeyType, rawKey: string): {
+    valid: boolean;
+    normalizedKey: string;
+    maskedKey: string;
+    errorMessage?: string;
+  } {
+    const trimmed = (rawKey || '').trim();
+    if (!trimmed) {
+      return {
+        valid: false,
+        normalizedKey: '',
+        maskedKey: '',
+        errorMessage: 'Informe uma chave PIX válida vinculada à sua titularidade.',
+      };
+    }
+
+    if (pixKeyType === 'CPF') {
+      const digits = trimmed.replace(/\D/g, '');
+      if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) {
+        return {
+          valid: false,
+          normalizedKey: digits,
+          maskedKey: '',
+          errorMessage: 'CPF inválido. Informe os 11 dígitos numéricos do titular.',
+        };
+      }
+      return {
+        valid: true,
+        normalizedKey: digits,
+        maskedKey: `***.${digits.slice(3, 6)}.${digits.slice(6, 9)}-**`,
+      };
+    }
+
+    if (pixKeyType === 'CNPJ') {
+      const digits = trimmed.replace(/\D/g, '');
+      if (digits.length !== 14) {
+        return {
+          valid: false,
+          normalizedKey: digits,
+          maskedKey: '',
+          errorMessage: 'CNPJ inválido. Informe os 14 dígitos numéricos.',
+        };
+      }
+      return {
+        valid: true,
+        normalizedKey: digits,
+        maskedKey: `${digits.slice(0, 2)}.***.***/${digits.slice(8, 12)}-**`,
+      };
+    }
+
+    if (pixKeyType === 'EMAIL') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmed)) {
+        return {
+          valid: false,
+          normalizedKey: trimmed.toLowerCase(),
+          maskedKey: '',
+          errorMessage: 'E-mail PIX inválido. Verifique o formato informado.',
+        };
+      }
+      const [local, domain] = trimmed.toLowerCase().split('@');
+      const maskedLocal = local.length <= 2 ? `${local[0]}***` : `${local.slice(0, 2)}***`;
+      return {
+        valid: true,
+        normalizedKey: trimmed.toLowerCase(),
+        maskedKey: `${maskedLocal}@${domain}`,
+      };
+    }
+
+    if (pixKeyType === 'PHONE') {
+      const digits = trimmed.replace(/\D/g, '');
+      if (digits.length < 10 || digits.length > 13) {
+        return {
+          valid: false,
+          normalizedKey: digits,
+          maskedKey: '',
+          errorMessage: 'Celular PIX inválido. Informe DDD + número (10 ou 11 dígitos).',
+        };
+      }
+      return {
+        valid: true,
+        normalizedKey: `+55${digits.slice(-11)}`,
+        maskedKey: `(**) *****-${digits.slice(-4)}`,
+      };
+    }
+
+    // RANDOM (Chave Aleatória EVP)
+    if (trimmed.length < 16) {
+      return {
+        valid: false,
+        normalizedKey: trimmed,
+        maskedKey: '',
+        errorMessage: 'Chave PIX aleatória inválida (mínimo de 16 caracteres).',
+      };
+    }
+    return {
+      valid: true,
+      normalizedKey: trimmed,
+      maskedKey: `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`,
+    };
+  }
+
+  /**
+   * SOLICITAÇÃO ATÔMICA DE SAQUE DA "MINHA CARTEIRA"
+   * - Valida valor mínimo (R$ 50,00 = 5000 centavos) e limite máximo diário (R$ 10.000,00).
+   * - Valida chave PIX e titularidade declarada.
+   * - Aplica tarifa R$ 0,00 para PIX verificado.
+   * - Debita atomicamente CREATOR_AVAILABLE_BRL e credita CREATOR_PAYOUT_ESCROW.
+   * - Registra PayoutRecord com status 'under_review' (nunca marca como concluído antes do gateway).
+   * - Garante idempotência e proteção contra concorrência pela fila serializada.
+   */
+  public async requestUnifiedWalletPayout(params: {
+    userId: string;
+    userName: string;
+    amountCents: number;
+    pixKeyType: PixKeyType;
+    pixKey: string;
+    holderConfirmed: boolean;
+    idempotencyKey: string;
+    environment?: PayoutEnvironment;
+  }): Promise<{
+    payout: PayoutRecord;
+    ledgerEntry: LedgerEntry;
+    updatedSummary: UnifiedWalletSummary;
+    isReplay: boolean;
+  }> {
+    return this.enqueue(async () => {
+      if (!params.userId || !params.userId.trim()) {
+        throw new Error('Identificação do usuário é obrigatória para solicitar saque.');
+      }
+      if (!params.idempotencyKey || !params.idempotencyKey.trim()) {
+        throw new Error('Chave de idempotência obrigatória para solicitação de saque.');
+      }
+      if (!params.holderConfirmed) {
+        throw new Error('É obrigatório confirmar que a chave PIX pertence à mesma titularidade da conta.');
+      }
+      if (!Number.isInteger(params.amountCents) || params.amountCents <= 0) {
+        throw new Error('O valor do saque deve ser informado em centavos inteiros positivos.');
+      }
+
+      const isProd =
+        params.environment === 'production' ||
+        (!params.environment && !runtimeEnvironmentService.isSimulationMode());
+      const env: PayoutEnvironment = isProd ? 'production' : 'sandbox';
+
+      // 1. Verificação de Idempotência antes de qualquer validação de saldo que possa ter mudado após a 1ª execução
+      const existingRecords = this.getPayoutRecords(env);
+      const existingPayout = existingRecords.find((p) => p.idempotencyKey === params.idempotencyKey);
+      if (existingPayout) {
+        if (existingPayout.creatorId !== params.userId || existingPayout.amountCents !== params.amountCents) {
+          throw new Error(
+            `Conflito de idempotência: a chave ${params.idempotencyKey} já foi utilizada com parâmetros divergentes.`
+          );
+        }
+        const allEntries = this.getEntries();
+        const existingEntry =
+          allEntries.find((e) => e.id === existingPayout.ledgerEntryId) ||
+          allEntries.find((e) => e.referenceId === existingPayout.id)!;
+        return {
+          payout: existingPayout,
+          ledgerEntry: existingEntry,
+          updatedSummary: this.getUnifiedWalletSummary(params.userId),
+          isReplay: true,
+        };
+      }
+
+      // 2. Validação da regra real de valor mínimo (R$ 50,00 = 5000 centavos) e teto diário (R$ 10.000,00)
+      const MIN_WITHDRAWAL_CENTS = 5000;
+      const MAX_WITHDRAWAL_CENTS = 1000000;
+      if (params.amountCents < MIN_WITHDRAWAL_CENTS) {
+        throw new Error(
+          `Valor abaixo do mínimo permitido para saque (mínimo: R$ 50,00; solicitado: R$ ${(params.amountCents / 100).toFixed(2).replace('.', ',')}).`
+        );
+      }
+      if (params.amountCents > MAX_WITHDRAWAL_CENTS) {
+        throw new Error(
+          `Valor excede o limite diário de saque por operação (máximo: R$ 10.000,00).`
+        );
+      }
+
+      // 3. Validação de formato da chave PIX
+      const pixCheck = this.validatePixDestination(params.pixKeyType, params.pixKey);
+      if (!pixCheck.valid) {
+        throw new Error(pixCheck.errorMessage || 'Chave PIX inválida.');
+      }
+
+      // 4. Verificação contábil de saldo disponível no livro-razão
+      const currentSummary = this.getUnifiedWalletSummary(params.userId);
+      if (currentSummary.availableBalanceCents < params.amountCents) {
+        throw new Error(
+          `Saldo disponível insuficiente para saque. Disponível: R$ ${currentSummary.availableBalanceBrl.toFixed(2)}, Solicitado: R$ ${(params.amountCents / 100).toFixed(2)}.`
+        );
+      }
+
+      const amountBrl = Number((params.amountCents / 100).toFixed(2));
+      const feeBrl = 0; // Tarifa zero para PIX verificado
+      const netAmountBrl = amountBrl;
+      const payoutId = `PAYOUT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const now = new Date().toISOString();
+
+      // 5. Reserva atômica no Livro-Razão (debita CREATOR_AVAILABLE_BRL e credita CREATOR_PAYOUT_ESCROW)
+      const txRes = await this._postTransactionAtomicDirect({
+        idempotencyKey: `${params.idempotencyKey}_reserve`,
+        description: `Solicitação de Saque PIX (${params.pixKeyType}: ${pixCheck.maskedKey}) — Reserva Contábil`,
+        actorId: params.userId,
+        entries: [
+          {
+            operationType: 'PAYOUT_RESERVE',
+            debitAccount: `CREATOR_AVAILABLE_BRL:${params.userId}`,
+            creditAccount: `CREATOR_PAYOUT_ESCROW:${params.userId}`,
+            amount: amountBrl,
+            amountCents: params.amountCents,
+            currency: 'BRL',
+            targetCreatorId: params.userId,
+            referenceId: payoutId,
+            description: `Saque solicitado via PIX (${params.pixKeyType} ${pixCheck.maskedKey}) — Em análise antifraude`,
+            metadata: {
+              originCategory: 'payout',
+              payoutId,
+              pixKeyType: params.pixKeyType,
+              pixKeyMasked: pixCheck.maskedKey,
+              feeCents: 0,
+              netAmountCents: params.amountCents,
+              environment: env,
+            },
+          },
+        ],
+      });
+
+      const reserveEntry = txRes.entries[0];
+
+      // 6. Criação do registro formal de Payout em status 'under_review' (nunca 'released' sem confirmação bancária)
+      const newPayout: PayoutRecord = {
+        id: payoutId,
+        idempotencyKey: params.idempotencyKey,
+        creatorId: params.userId,
+        creatorName: params.userName,
+        amountBrl,
+        amountCents: params.amountCents,
+        feeBrl,
+        netAmountBrl,
+        currency: 'BRL',
+        status: 'under_review',
+        environment: env,
+        isSimulation: env === 'sandbox',
+        payoutMethod: `PIX Verificado (${params.pixKeyType})`,
+        pixKeyOrAccount: pixCheck.maskedKey,
+        createdAt: now,
+        updatedAt: now,
+        transactionId: reserveEntry?.transactionId,
+        ledgerEntryId: reserveEntry?.id,
+        auditTrail: [
+          {
+            timestamp: now,
+            fromStatus: 'none',
+            toStatus: 'under_review',
+            actorId: params.userId,
+            reason: `Solicitação de saque registrada com reserva atômica no livro-razão (${env.toUpperCase()})`,
+          },
+        ],
+      };
+
+      this.savePayoutRecords([newPayout, ...existingRecords], env);
+
+      return {
+        payout: newPayout,
+        ledgerEntry: reserveEntry,
+        updatedSummary: this.getUnifiedWalletSummary(params.userId),
+        isReplay: false,
+      };
+    });
+  }
 }
 
 export const financialLedger = new FinancialLedgerService();
+

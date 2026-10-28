@@ -397,6 +397,196 @@ export async function runLedgerVerificationSuite(): Promise<{
     }
   }
 
+  // TESTE 8: Minha Carteira - Segregação Colaboradores vs Produtores de Conteúdo e Créditos Virtuais
+  {
+    const start = performance.now();
+    try {
+      const walletUserId = `wallet_user_${Date.now()}`;
+
+      // 1. Conceder 100 créditos de consumo (não sacáveis)
+      await financialLedger.purchaseCreditPackage({
+        userId: walletUserId,
+        packageId: 'pkg_inicial',
+        packageName: 'Inicial',
+        creditsToGrant: 100,
+        priceBrl: 19.9,
+        gateway: 'pix',
+        idempotencyKey: `idemp_wallet_credits_${Date.now()}`,
+      });
+
+      // 2. Registrar ganho de Colaborador (R$ 45,00 disponível + R$ 15,00 pendente)
+      await financialLedger.recordCollaboratorEarningAtomic({
+        userId: walletUserId,
+        amountCents: 4500,
+        subType: 'referral',
+        title: 'Indicação Verificada Nível 1',
+        referenceId: 'ref_001',
+        idempotencyKey: `idemp_wallet_collab_avail_${Date.now()}`,
+      });
+
+      await financialLedger.recordCollaboratorEarningAtomic({
+        userId: walletUserId,
+        amountCents: 1500,
+        subType: 'challenge_goal',
+        title: 'Meta Desafio em Análise',
+        referenceId: 'goal_002',
+        idempotencyKey: `idemp_wallet_collab_pend_${Date.now()}`,
+        isPendingReview: true,
+      });
+
+      // 3. Registrar ganho de Produtor de Conteúdo (R$ 75,00 disponível)
+      await financialLedger.recordContentProducerEarningAtomic({
+        userId: walletUserId,
+        amountCents: 7500,
+        subType: 'vip_vault',
+        title: 'Desbloqueio Cofre VIP (70%)',
+        referenceId: 'vault_001',
+        idempotencyKey: `idemp_wallet_prod_avail_${Date.now()}`,
+      });
+
+      const summary = financialLedger.getUnifiedWalletSummary(walletUserId);
+      const collabStatement = financialLedger.getUnifiedWalletStatement(walletUserId, 'collaborator');
+      const prodStatement = financialLedger.getUnifiedWalletStatement(walletUserId, 'content_producer');
+
+      const passed =
+        summary.collaboratorReceivedCents === 4500 &&
+        summary.collaboratorPendingCents === 1500 &&
+        summary.contentProducerReceivedCents === 7500 &&
+        summary.availableBalanceCents === 12000 && // R$ 45,00 + R$ 75,00 = R$ 120,00 (Créditos de consumo não entram no saldo BRL!)
+        summary.pendingReviewCents === 1500 &&
+        summary.userConsumptionCredits === 100 &&
+        collabStatement.length === 2 &&
+        prodStatement.length === 1;
+
+      results.push({
+        testName: 'Minha Carteira: Segregação Colaboradores vs Produtores de Conteúdo e Isolamento de Créditos',
+        passed,
+        message: passed
+          ? `Aprovado: Colaboradores=R$ ${summary.collaboratorReceivedBrl.toFixed(2)}, Produtores=R$ ${summary.contentProducerReceivedBrl.toFixed(2)}, Disponível=R$ ${summary.availableBalanceBrl.toFixed(2)}, Pendente=R$ ${summary.pendingReviewBrl.toFixed(2)}, Créditos Separados=${summary.userConsumptionCredits} 💎.`
+          : `Falha: Resumo divergente: ${JSON.stringify(summary)}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    } catch (e: any) {
+      results.push({
+        testName: 'Minha Carteira: Segregação Colaboradores vs Produtores de Conteúdo',
+        passed: false,
+        message: `Exceção: ${e?.message || e}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    }
+  }
+
+  // TESTE 9: Minha Carteira - Solicitação de Saque Atômica, Mínimo R$ 50,00, Tarifa Zero e Idempotência Concorrente
+  {
+    const start = performance.now();
+    try {
+      const withdrawUserId = `withdraw_user_${Date.now()}`;
+
+      // Creditar R$ 90,00 disponíveis (R$ 40 Colaborador + R$ 50 Produtor)
+      await financialLedger.recordCollaboratorEarningAtomic({
+        userId: withdrawUserId,
+        amountCents: 4000,
+        subType: 'challenge_goal',
+        title: 'Meta Desafio Semanal',
+        referenceId: 'goal_w_1',
+        idempotencyKey: `idemp_w_collab_${Date.now()}`,
+      });
+      await financialLedger.recordContentProducerEarningAtomic({
+        userId: withdrawUserId,
+        amountCents: 5000,
+        subType: 'media_unlock',
+        title: 'Foto Protegida Desbloqueada',
+        referenceId: 'media_w_1',
+        idempotencyKey: `idemp_w_prod_${Date.now()}`,
+      });
+
+      // 1. Deve rejeitar saque abaixo do mínimo de R$ 50,00 (ex: R$ 49,99 = 4999 centavos)
+      let rejectedBelowMinimum = false;
+      try {
+        await financialLedger.requestUnifiedWalletPayout({
+          userId: withdrawUserId,
+          userName: 'Criador Teste Saque',
+          amountCents: 4999,
+          pixKeyType: 'CPF',
+          pixKey: '123.456.789-01',
+          holderConfirmed: true,
+          idempotencyKey: `idemp_w_min_fail_${Date.now()}`,
+        });
+      } catch (err: any) {
+        rejectedBelowMinimum = err.message.includes('mínimo permitido para saque');
+      }
+
+      // 2. Deve rejeitar saque acima do saldo disponível (ex: R$ 95,00 > R$ 90,00)
+      let rejectedAboveBalance = false;
+      try {
+        await financialLedger.requestUnifiedWalletPayout({
+          userId: withdrawUserId,
+          userName: 'Criador Teste Saque',
+          amountCents: 9500,
+          pixKeyType: 'CPF',
+          pixKey: '123.456.789-01',
+          holderConfirmed: true,
+          idempotencyKey: `idemp_w_bal_fail_${Date.now()}`,
+        });
+      } catch (err: any) {
+        rejectedAboveBalance = err.message.includes('Saldo disponível insuficiente');
+      }
+
+      // 3. Solicitação concorrente válida de R$ 60,00 (6000 centavos) com mesma chave de idempotência
+      const validWithdrawKey = `idemp_w_valid_concurrent_${Date.now()}`;
+      const [req1, req2] = await Promise.all([
+        financialLedger.requestUnifiedWalletPayout({
+          userId: withdrawUserId,
+          userName: 'Criador Teste Saque',
+          amountCents: 6000,
+          pixKeyType: 'CPF',
+          pixKey: '123.456.789-01',
+          holderConfirmed: true,
+          idempotencyKey: validWithdrawKey,
+        }),
+        financialLedger.requestUnifiedWalletPayout({
+          userId: withdrawUserId,
+          userName: 'Criador Teste Saque',
+          amountCents: 6000,
+          pixKeyType: 'CPF',
+          pixKey: '123.456.789-01',
+          holderConfirmed: true,
+          idempotencyKey: validWithdrawKey,
+        }),
+      ]);
+
+      const afterSummary = financialLedger.getUnifiedWalletSummary(withdrawUserId);
+      const exactlyOneReplay = (req1.isReplay && !req2.isReplay) || (!req1.isReplay && req2.isReplay);
+
+      const passed =
+        rejectedBelowMinimum &&
+        rejectedAboveBalance &&
+        exactlyOneReplay &&
+        req1.payout.id === req2.payout.id &&
+        req1.payout.status === 'under_review' && // Não marca como concluído antes do serviço de pagamento
+        req1.payout.feeBrl === 0 &&
+        req1.payout.netAmountBrl === 60.0 &&
+        afterSummary.availableBalanceCents === 3000 && // R$ 90,00 - R$ 60,00 = R$ 30,00 restantes
+        afterSummary.payoutReservedCents === 6000; // R$ 60,00 reservados em Escrow
+
+      results.push({
+        testName: 'Minha Carteira: Saque Atômico (Mínimo R$ 50,00, Reserva Escrow, Status under_review e Concorrência)',
+        passed,
+        message: passed
+          ? `Aprovado: Rejeitou < R$ 50,00 e > saldo; reservou R$ 60,00 em Escrow (status '${req1.payout.status}', tarifa R$ 0,00), restando R$ 30,00 disponíveis sem duplicar em chamadas concorrentes.`
+          : `Falha: min=${rejectedBelowMinimum}, bal=${rejectedAboveBalance}, replay=${exactlyOneReplay}, avail=${afterSummary.availableBalanceCents}, reserved=${afterSummary.payoutReservedCents}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    } catch (e: any) {
+      results.push({
+        testName: 'Minha Carteira: Saque Atômico e Concorrência',
+        passed: false,
+        message: `Exceção: ${e?.message || e}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    }
+  }
+
   const allPassed = results.every((r) => r.passed);
   return { allPassed, results };
 }

@@ -17,6 +17,8 @@ import {
   Search,
   X,
 } from 'lucide-react';
+import { ProtectedMediaViewer } from './ProtectedMediaViewer';
+import { authService } from '../utils/authService';
 
 interface ChatViewProps {
   profiles: Profile[];
@@ -597,31 +599,23 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </div>
                   )}
 
-                  {/* Locked / Unlocked VIP Media in Chat */}
+                  {/* Locked / Unlocked VIP Media in Chat (Proteção Fase 1, 2 e 3) */}
                   {msg.vipMedia && (
                     <div className="mt-2 max-w-xs rounded-2xl overflow-hidden border border-amber-500/40 bg-[#161622] shadow-xl">
                       <div className="relative aspect-[4/3] w-full overflow-hidden bg-black">
-                        <img
-                          src={msg.vipMedia.mediaUrl}
-                          alt={msg.vipMedia.title}
-                          referrerPolicy="no-referrer"
-                          className={`w-full h-full object-cover transition-all duration-300 ${
-                            msg.vipMedia.isUnlocked ? 'filter-none' : 'filter blur-[16px] scale-110'
-                          }`}
+                        <ProtectedMediaViewer
+                          media={msg.vipMedia}
+                          creatorName={activeProfile?.name || 'Criador VIP'}
+                          isUnlocked={Boolean(msg.vipMedia.isUnlocked && !isContactBlocked)}
+                          userCredits={userCredits}
+                          currentUserId={authService.getCurrentSession()?.userId || 'current_user'}
+                          aspectRatio="auto"
+                          className="aspect-[4/3]"
+                          onUnlockRequest={() => handleUnlockInChat(msg.vipMedia!)}
+                          showWatermark={true}
                         />
-
-                        {!msg.vipMedia.isUnlocked ? (
-                          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center p-3 text-center">
-                            <Lock className="w-6 h-6 text-amber-400 mb-1" />
-                            <span className="text-xs font-bold text-white mb-0.5">
-                              Foto Privada Enviada
-                            </span>
-                            <span className="text-[10px] text-amber-300 font-mono">
-                              {msg.vipMedia.priceCredits} Créditos
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 text-[10px] font-bold flex items-center gap-1 border border-emerald-500/40">
+                        {msg.vipMedia.isUnlocked && !isContactBlocked && (
+                          <div className="absolute top-2 left-2 z-30 px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 text-[10px] font-bold flex items-center gap-1 border border-emerald-500/40 pointer-events-none">
                             <Unlock className="w-3 h-3" />
                             <span>Desbloqueada</span>
                           </div>
@@ -640,7 +634,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           </button>
                         ) : (
                           <span className="text-[11px] text-emerald-400 font-medium">
-                            Disponível para sempre no seu chat
+                            Visualização protegida com marca-d’água ativa
                           </span>
                         )}
                       </div>

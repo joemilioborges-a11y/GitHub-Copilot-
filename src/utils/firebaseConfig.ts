@@ -27,14 +27,14 @@ export type FirebaseAppletCredentials = FirebaseAppletConfig;
 
 const DEFAULT_FIREBASE_APPLET_CONFIG: FirebaseAppletConfig = {
   projectId: 'gen-lang-client-0491658347',
-  appId: '1:718871980484:web:f94517bd-f73d-4ef7-a99c-d8080b58c257',
-  apiKey: 'AIzaSyD-placeholder-key-for-applet-init',
+  appId: '1:541885029150:web:57f62836abdd4b6cb4870f',
+  apiKey: 'AIzaSyDNakpK3SRV8Xu0ZJ9vclwIKOKcFE0PDiI',
   authDomain: 'gen-lang-client-0491658347.firebaseapp.com',
   firestoreDatabaseId: 'ai-studio-jhobs-f94517bd-f73d-4ef7-a99c-d8080b58c257',
   storageBucket: 'gen-lang-client-0491658347.firebasestorage.app',
-  messagingSenderId: '718871980484',
+  messagingSenderId: '541885029150',
   measurementId: '',
-  oAuthClientId: '718871980484-dev.apps.googleusercontent.com',
+  oAuthClientId: '541885029150-35227l6up26oavulhss5afit095fjh8k.apps.googleusercontent.com',
   recaptchaSiteKey: '',
 };
 

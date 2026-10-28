@@ -13,6 +13,8 @@
 import { TemporaryAccessToken, VipMediaItem } from '../types';
 import { monetizationService } from './monetizationService';
 
+export const PROTECTED_MEDIA_CACHE_CONTROL = 'private, no-store, no-cache, max-age=0, must-revalidate';
+
 export interface ProtectedMediaTicket {
   ticketId: string;
   contentId: string;
@@ -21,6 +23,8 @@ export interface ProtectedMediaTicket {
   issuedAt: string;
   expiresAt: string;
   ttlSeconds: number;
+  cacheControl: string;
+  pragma: 'no-cache';
   watermarkPayload: {
     obfuscatedUserId: string;
     sessionId: string;
@@ -45,6 +49,7 @@ export interface MediaAccessResult {
   deliveryUrl?: string;
   isTeaserOnly?: boolean;
   ticket?: ProtectedMediaTicket;
+  cacheControl?: string;
 }
 
 export interface MediaSecurityAuditRecord {
@@ -55,6 +60,7 @@ export interface MediaSecurityAuditRecord {
     | 'MEDIA_ACCESS_GRANTED'
     | 'MEDIA_ACCESS_DENIED'
     | 'MEDIA_TOKEN_REVOKED'
+    | 'MEDIA_TOKEN_RENEWED'
     | 'IDOR_ATTEMPT_BLOCKED';
   contentId: string;
   reason: string;
@@ -93,6 +99,35 @@ export function obfuscateUserIdForWatermark(userId: string): string {
   const prefix = clean.substring(0, 4);
   const suffix = clean.substring(clean.length - 2);
   return `USR-${prefix}***${suffix}`;
+}
+
+export function formatForensicWatermark(
+  userId: string,
+  sessionCode?: string,
+  issuedAt?: string
+): {
+  obfuscatedUserId: string;
+  sessionCode: string;
+  primaryLine: string;
+  secondaryLine: string;
+  displayNotice: string;
+} {
+  const obfuscatedUserId = obfuscateUserIdForWatermark(userId);
+  const safeSession = (sessionCode || 'SESS-VIP')
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 14)
+    .toUpperCase();
+  const dateObj = issuedAt ? new Date(issuedAt) : new Date();
+  const safeDateStr = Number.isNaN(dateObj.getTime())
+    ? new Date().toLocaleDateString('pt-BR')
+    : dateObj.toLocaleDateString('pt-BR');
+  return {
+    obfuscatedUserId,
+    sessionCode: safeSession,
+    primaryLine: `JOBS · ${obfuscatedUserId} · CÓPIA PROIBIDA`,
+    secondaryLine: `SESSÃO #${safeSession} · ${safeDateStr}`,
+    displayNotice: `JOBS VIP · ID: ${obfuscatedUserId} · ${safeDateStr}`,
+  };
 }
 
 function getSafeStorage(): {
@@ -157,7 +192,8 @@ export class ProtectedMediaService {
   }
 
   /**
-   * Bloqueia ou restringe um usuário administrativamente ou por moderação
+   * Bloqueia ou restringe um usuário administrativamente ou por moderação e
+   * revoga imediatamente todos os seus tickets temporários emitidos.
    */
   public blockUserFromMedia(userId: string, reason: string): void {
     const blocked = this.getItem<Record<string, { blockedAt: string; reason: string }>>(
@@ -169,6 +205,7 @@ export class ProtectedMediaService {
       reason,
     };
     this.setItem(STORAGE_KEY_BLOCKED_USERS, blocked);
+    this.revokeTokensForUser(userId, `Bloqueio de segurança: ${reason}`);
     this.recordAudit({
       actorId: userId,
       action: 'MEDIA_ACCESS_DENIED',
@@ -191,19 +228,21 @@ export class ProtectedMediaService {
       STORAGE_KEY_BLOCKED_USERS,
       {}
     );
-    return Boolean(blocked[userId]);
+    if (blocked[userId]) return true;
+    const appBlocked = this.getItem<string[]>('jhobs_blocked_user_ids', []);
+    return Array.isArray(appBlocked) && appBlocked.includes(userId);
   }
 
   /**
    * Retorna exclusivamente o preview teaser seguro (sem expor a URL do arquivo privado master no DOM
    * para conteúdos trancados).
    */
-  public getPublicTeaserUrl(media: Pick<VipMediaItem, 'id' | 'mediaUrl'>): string {
+  public getPublicTeaserUrl(media: { id: string; mediaUrl?: string; title?: string }): string {
     return buildProtectedTeaserDataUri(media.id);
   }
 
   /**
-   * Constrói uma URL de entrega assinada de curta duração vinculada ao ticket, usuário e conteúdo.
+   * Constrói uma URL de entrega assinada de curta duração vinculada ao ticket, usuário, conteúdo e diretiva anti-cache.
    */
   private buildSignedDeliveryUrl(rawMasterUrl: string, ticket: ProtectedMediaTicket): string {
     const separator = rawMasterUrl.includes('?') ? '&' : '?';
@@ -211,7 +250,7 @@ export class ProtectedMediaService {
       ticket.contentId
     )}&uid=${encodeURIComponent(ticket.authorizedUserId)}&exp=${encodeURIComponent(
       ticket.expiresAt
-    )}&sig=${encodeURIComponent(ticket.signature)}`;
+    )}&cc=no-store&sig=${encodeURIComponent(ticket.signature)}`;
   }
 
   /**
@@ -222,8 +261,9 @@ export class ProtectedMediaService {
     deliveryUrl: string;
     requestingUserId: string;
     expectedContentId?: string;
+    simulatedNowMs?: number;
   }): MediaAccessResult {
-    const { deliveryUrl, requestingUserId, expectedContentId } = params;
+    const { deliveryUrl, requestingUserId, expectedContentId, simulatedNowMs } = params;
 
     if (!requestingUserId || !requestingUserId.trim()) {
       return {
@@ -231,6 +271,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_UNAUTHENTICATED',
         reason: 'Acesso direto negado: solicitante não autenticado.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -240,6 +281,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_USER_BLOCKED',
         reason: 'Acesso direto negado: usuário bloqueado.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -256,6 +298,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_INVALID_SIGNATURE',
         reason: 'Acesso direto bloqueado: URL não possui assinatura temporária válida.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -272,6 +315,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_INVALID_SIGNATURE',
         reason: 'Acesso negado: parâmetros obrigatórios de assinatura ausentes na URL.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -283,6 +327,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_REVOKED',
         reason: 'O ticket temporário desta URL foi revogado.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -299,17 +344,20 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_IDOR',
         reason: 'Acesso negado: tentativa de acesso cruzado (IDOR) detectada na URL assinada.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
     // Verificação de expiração
     const expMs = Date.parse(exp);
-    if (Number.isNaN(expMs) || Date.now() > expMs) {
+    const nowMs = simulatedNowMs ?? Date.now();
+    if (Number.isNaN(expMs) || nowMs > expMs) {
       return {
         allowed: false,
         code: 'ACCESS_DENIED_EXPIRED',
         reason: 'A URL temporária assinada expirou.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -327,6 +375,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_INVALID_SIGNATURE',
         reason: 'Assinatura da URL inválida ou parâmetros adulterados.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -336,6 +385,7 @@ export class ProtectedMediaService {
       reason: 'URL assinada íntegra e dentro do prazo de validade.',
       deliveryUrl,
       isTeaserOnly: false,
+      cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
     };
   }
 
@@ -353,9 +403,17 @@ export class ProtectedMediaService {
     contentId: string;
     rawMasterUrl: string;
     isContentFree?: boolean;
+    hasExternalGrant?: boolean;
     existingToken?: TemporaryAccessToken;
   }): MediaAccessResult {
-    const { userId, contentId, rawMasterUrl, isContentFree = false, existingToken } = params;
+    const {
+      userId,
+      contentId,
+      rawMasterUrl,
+      isContentFree = false,
+      hasExternalGrant = false,
+      existingToken,
+    } = params;
 
     // 1. Validação de identidade básica
     if (!userId || userId.trim() === '') {
@@ -370,6 +428,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_UNAUTHENTICATED',
         reason: 'Usuário não autenticado. Faça login para acessar este conteúdo.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -386,6 +445,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_CONTENT_NOT_FOUND',
         reason: 'Conteúdo protegido não encontrado ou indisponível.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -402,6 +462,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_USER_BLOCKED',
         reason: 'Sua conta possui restrição de acesso temporária por moderação de segurança.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -421,6 +482,7 @@ export class ProtectedMediaService {
           code: 'ACCESS_DENIED_REVOKED',
           reason: 'O link temporário para esta mídia foi revogado.',
           isTeaserOnly: true,
+          cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
         };
       }
 
@@ -439,6 +501,7 @@ export class ProtectedMediaService {
           code: 'ACCESS_DENIED_EXPIRED',
           reason: 'O link temporário expirou por segurança. Atualize para renovar o acesso.',
           isTeaserOnly: true,
+          cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
         };
       }
 
@@ -455,6 +518,7 @@ export class ProtectedMediaService {
           code: 'ACCESS_DENIED_IDOR',
           reason: 'Acesso negado: credencial de acesso não pertence ao seu usuário.',
           isTeaserOnly: true,
+          cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
         };
       }
 
@@ -471,6 +535,7 @@ export class ProtectedMediaService {
           code: 'ACCESS_DENIED_IDOR',
           reason: 'Acesso negado: identificador de conteúdo adulterado.',
           isTeaserOnly: true,
+          cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
         };
       }
     }
@@ -485,11 +550,12 @@ export class ProtectedMediaService {
         deliveryUrl: this.buildSignedDeliveryUrl(rawMasterUrl, ticket),
         isTeaserOnly: false,
         ticket,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
-    // 6. Verificação de Concessão Ativa (ContentAccessGrant)
-    const hasGrant = monetizationService.hasAccess(userId, contentId);
+    // 6. Verificação de Concessão Ativa (ContentAccessGrant ou hasExternalGrant)
+    const hasGrant = hasExternalGrant || monetizationService.hasAccess(userId, contentId);
     if (!hasGrant) {
       this.recordAudit({
         actorId: userId,
@@ -502,6 +568,7 @@ export class ProtectedMediaService {
         code: 'ACCESS_DENIED_NO_GRANT',
         reason: 'Conteúdo exclusivo bloqueado. Desbloqueie com créditos para visualizar.',
         isTeaserOnly: true,
+        cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       };
     }
 
@@ -522,7 +589,73 @@ export class ProtectedMediaService {
       deliveryUrl: this.buildSignedDeliveryUrl(rawMasterUrl, ticket),
       isTeaserOnly: false,
       ticket,
+      cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
     };
+  }
+
+  /**
+   * Renovação controlada de ticket expirado: revalida autenticação, bloqueios e direito de acesso
+   * vigente, revoga o ticket anterior (se informado) e emite nova URL assinada sem cobrar novamente.
+   */
+  public renewMediaTicket(params: {
+    userId: string;
+    contentId: string;
+    rawMasterUrl: string;
+    previousTicketId?: string;
+    isContentFree?: boolean;
+    hasExternalGrant?: boolean;
+  }): MediaAccessResult {
+    const {
+      userId,
+      contentId,
+      rawMasterUrl,
+      previousTicketId,
+      isContentFree = false,
+      hasExternalGrant = false,
+    } = params;
+
+    if (previousTicketId) {
+      const issued = this.getItem<Record<string, ProtectedMediaTicket>>(
+        STORAGE_KEY_ISSUED_TICKETS,
+        {}
+      );
+      const oldTicket = issued[previousTicketId];
+      if (oldTicket && (oldTicket.authorizedUserId !== userId || oldTicket.contentId !== contentId)) {
+        this.recordAudit({
+          actorId: userId || 'anonymous',
+          action: 'IDOR_ATTEMPT_BLOCKED',
+          contentId,
+          reason: `Tentativa de renovar ticket pertencente a outro usuário ou conteúdo (${previousTicketId}).`,
+        });
+        return {
+          allowed: false,
+          code: 'ACCESS_DENIED_IDOR',
+          reason: 'Renovação negada: o ticket anterior não pertence ao seu usuário ou a esta mídia.',
+          isTeaserOnly: true,
+          cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
+        };
+      }
+      this.revokeToken(previousTicketId, 'Substituído por renovação controlada de ticket expirado.');
+    }
+
+    const res = this.requestAuthorizedMediaAccess({
+      userId,
+      contentId,
+      rawMasterUrl,
+      isContentFree,
+      hasExternalGrant,
+    });
+
+    if (res.allowed && res.ticket) {
+      this.recordAudit({
+        actorId: userId,
+        action: 'MEDIA_TOKEN_RENEWED',
+        contentId,
+        reason: `Ticket renovado com sucesso (${res.ticket.ticketId}) sem nova cobrança.`,
+      });
+    }
+
+    return res;
   }
 
   /**
@@ -534,8 +667,8 @@ export class ProtectedMediaService {
     const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString(); // 15 minutos
     const signature = generateSecureMediaSignature(ticketId, userId, contentId, expiresAt);
 
-    const obfuscated = obfuscateUserIdForWatermark(userId);
     const sessionId = `s_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const wm = formatForensicWatermark(userId, sessionId, now.toISOString());
 
     const ticket: ProtectedMediaTicket = {
       ticketId,
@@ -545,10 +678,12 @@ export class ProtectedMediaService {
       issuedAt: now.toISOString(),
       expiresAt,
       ttlSeconds: 900,
+      cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
+      pragma: 'no-cache',
       watermarkPayload: {
-        obfuscatedUserId: obfuscated,
+        obfuscatedUserId: wm.obfuscatedUserId,
         sessionId,
-        displayNotice: `JOBS VIP · ID: ${obfuscated} · ${now.toLocaleDateString('pt-BR')}`,
+        displayNotice: wm.displayNotice,
         issuedTimestamp: now.toISOString(),
       },
     };
@@ -578,6 +713,68 @@ export class ProtectedMediaService {
       contentId: tokenId,
       reason,
     });
+  }
+
+  /**
+   * Revoga imediatamente todos os tickets emitidos para um determinado conteúdo
+   * (ex: quando a modalidade, visibilidade ou estado da publicação é alterado).
+   */
+  public revokeTokensForContent(contentId: string, reason: string): number {
+    const issued = this.getItem<Record<string, ProtectedMediaTicket>>(
+      STORAGE_KEY_ISSUED_TICKETS,
+      {}
+    );
+    const revoked = this.getItem<string[]>(STORAGE_KEY_REVOKED_TOKENS, []);
+    let count = 0;
+
+    for (const [tktId, ticket] of Object.entries(issued)) {
+      if (ticket.contentId === contentId && !revoked.includes(tktId)) {
+        revoked.push(tktId);
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      this.setItem(STORAGE_KEY_REVOKED_TOKENS, revoked);
+      this.recordAudit({
+        actorId: 'system_security',
+        action: 'MEDIA_TOKEN_REVOKED',
+        contentId,
+        reason: `${count} ticket(s) revogado(s) para o conteúdo: ${reason}`,
+      });
+    }
+    return count;
+  }
+
+  /**
+   * Revoga imediatamente todos os tickets emitidos para um usuário específico
+   * (ex: quando o usuário é bloqueado ou tem permissões revogadas).
+   */
+  public revokeTokensForUser(userId: string, reason: string): number {
+    const issued = this.getItem<Record<string, ProtectedMediaTicket>>(
+      STORAGE_KEY_ISSUED_TICKETS,
+      {}
+    );
+    const revoked = this.getItem<string[]>(STORAGE_KEY_REVOKED_TOKENS, []);
+    let count = 0;
+
+    for (const [tktId, ticket] of Object.entries(issued)) {
+      if (ticket.authorizedUserId === userId && !revoked.includes(tktId)) {
+        revoked.push(tktId);
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      this.setItem(STORAGE_KEY_REVOKED_TOKENS, revoked);
+      this.recordAudit({
+        actorId: userId,
+        action: 'MEDIA_TOKEN_REVOKED',
+        contentId: '*',
+        reason: `${count} ticket(s) do usuário revogado(s): ${reason}`,
+      });
+    }
+    return count;
   }
 
   /**

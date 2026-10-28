@@ -22,6 +22,7 @@ import {
   Flame,
 } from 'lucide-react';
 import { VerifiedBadge } from './VerifiedBadge';
+import { protectedMediaService } from '../services/protectedMediaService';
 
 interface ProfileDetailModalProps {
   profile: Profile;
@@ -581,12 +582,20 @@ export const ProfileDetailModal: React.FC<ProfileDetailModalProps> = ({
                     className="relative rounded-2xl overflow-hidden bg-[#161622] border border-amber-500/30 flex flex-col group shadow-lg"
                   >
                     {/* Media Image Container */}
-                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-black">
+                    <div
+                      className="relative aspect-[4/3] w-full overflow-hidden bg-black select-none"
+                      onContextMenu={(e) => e.preventDefault()}
+                    >
                       <img
-                        src={media.mediaUrl}
+                        src={
+                          media.isUnlocked
+                            ? media.mediaUrl
+                            : protectedMediaService.getPublicTeaserUrl(media)
+                        }
                         alt={media.title}
+                        draggable={false}
                         referrerPolicy="no-referrer"
-                        className={`w-full h-full object-cover transition-all duration-300 ${
+                        className={`w-full h-full object-cover pointer-events-none transition-all duration-300 ${
                           media.isUnlocked ? 'filter-none group-hover:scale-105' : 'filter blur-[14px] scale-110'
                         }`}
                       />

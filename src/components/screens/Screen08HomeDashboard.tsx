@@ -17,6 +17,8 @@ import {
 import { Profile, UserProfileData, UserSubscription } from '../../types';
 import { calculateAiCompatibility } from '../../utils/aiMatchmaking';
 import { MonthlyRecognitionPublicSection } from '../MonthlyRecognitionPublicSection';
+import { HomeWalletSection } from '../HomeWalletSection';
+import { TalentWorthSection } from '../TalentWorthSection';
 
 interface Screen08HomeDashboardProps {
   userProfile: UserProfileData;
@@ -29,6 +31,7 @@ interface Screen08HomeDashboardProps {
   onOpenChallenges?: () => void;
   onOpenWallet?: () => void;
   onOpenCreatorContentStudio?: () => void;
+  onOpenReferralModal?: () => void;
 }
 
 export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
@@ -42,6 +45,7 @@ export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
   onOpenChallenges,
   onOpenWallet,
   onOpenCreatorContentStudio,
+  onOpenReferralModal,
 }) => {
   // Take top 4 compatible profiles
   const recommendedProfiles = profiles.slice(0, 4).map((p) => {
@@ -86,6 +90,25 @@ export const Screen08HomeDashboard: React.FC<Screen08HomeDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Minha Carteira Financeira Unificada */}
+      <HomeWalletSection
+        userId="current_user"
+        userName={userProfile.name || 'Usuário JOBS'}
+        onOpenChallenges={onOpenChallenges}
+        onOpenCreatorContentStudio={onOpenCreatorContentStudio}
+        onOpenReferralModal={onOpenReferralModal}
+        onOpenCreditsWallet={onOpenWallet}
+      />
+
+      {/* Seção "Seu talento vale muito!" — Desafios, Metas e Evolução (Simulação e Produção Auditada) */}
+      <TalentWorthSection
+        userId="current_user"
+        onNavigate={onNavigate}
+        onOpenChallenges={onOpenChallenges}
+        onOpenCreatorContentStudio={onOpenCreatorContentStudio}
+        onOpenReferralModal={onOpenReferralModal}
+      />
 
       {/* Metrics Row */}
       <div className="grid grid-cols-3 gap-3">

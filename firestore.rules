@@ -200,6 +200,54 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidTalentProgressSnapshot(data, userId) {
+      let keys = [
+        'userId',
+        'role',
+        'environmentMode',
+        'approvedPublishedMediaCount',
+        'collaboratorVerifiedActionsCount',
+        'eligibleMutualAndChatInteractionsCount',
+        'validLiveSessionsCount',
+        'weeklyActiveDaysCount',
+        'eligibleEngagementEventsCount',
+        'pontosConquistados',
+        'levelNumber',
+        'desafiosConcluidosCount',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.userId is string
+        && data.userId == userId
+        && data.userId.size() >= 1 && data.userId.size() <= 128
+        && data.role is string
+        && (data.role == 'produtor_conteudo' || data.role == 'colaborador')
+        && data.environmentMode is string
+        && data.environmentMode == 'production'
+        && data.approvedPublishedMediaCount is int
+        && data.approvedPublishedMediaCount >= 0 && data.approvedPublishedMediaCount <= 1000000
+        && data.collaboratorVerifiedActionsCount is int
+        && data.collaboratorVerifiedActionsCount >= 0 && data.collaboratorVerifiedActionsCount <= 1000000
+        && data.eligibleMutualAndChatInteractionsCount is int
+        && data.eligibleMutualAndChatInteractionsCount >= 0 && data.eligibleMutualAndChatInteractionsCount <= 1000000
+        && data.validLiveSessionsCount is int
+        && data.validLiveSessionsCount >= 0 && data.validLiveSessionsCount <= 1000000
+        && data.weeklyActiveDaysCount is int
+        && data.weeklyActiveDaysCount >= 0 && data.weeklyActiveDaysCount <= 7
+        && data.eligibleEngagementEventsCount is int
+        && data.eligibleEngagementEventsCount >= 0 && data.eligibleEngagementEventsCount <= 1000000
+        && data.pontosConquistados is int
+        && data.pontosConquistados >= 0 && data.pontosConquistados <= 1000000
+        && data.levelNumber is int
+        && data.levelNumber >= 1 && data.levelNumber <= 10
+        && data.desafiosConcluidosCount is int
+        && data.desafiosConcluidosCount >= 0 && data.desafiosConcluidosCount <= 5
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // ============================================================================
     // Admin RBAC Directory
     // ============================================================================
@@ -305,6 +353,24 @@ service cloud.firestore {
     }
 
     // ============================================================================
+    // Protected Media Access Grants & Signed Ephemeral Deliveries (Anti-IDOR)
+    // Only the authenticated buyer, the content creator, or a verified admin can read.
+    // Direct client tampering/deletion by non-admin users is forbidden.
+    // ============================================================================
+    match /media_access_grants/{grantId} {
+      allow get, list: if isAdmin()
+        || (isSignedIn() && resource.data.buyerUserId == request.auth.uid)
+        || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /signed_media_deliveries/{deliveryId} {
+      allow get, list: if isAdmin()
+        || (isSignedIn() && resource.data.buyerUserId == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ============================================================================
     // Diagnostic Connectivity & Permission Probe (test_audit)
     // Principle of Least Privilege:
     // - Read: Authenticated users and administrators only.
@@ -324,6 +390,25 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time;
       allow delete: if isAdmin();
+    }
+
+    // ============================================================================
+    // Audited Talent Progress Snapshots (/talent_progress/{userId})
+    // Strictly isolated from /ledger_entries; accepts only 'production' snapshots
+    // from the authenticated owner or verified administrator with server timestamps.
+    // ============================================================================
+    match /talent_progress/{userId} {
+      allow get, list: if isOwner(userId) || isAdmin();
+      allow create: if (isOwner(userId) || isAdmin())
+        && isValidTalentProgressSnapshot(request.resource.data, userId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if (isOwner(userId) || isAdmin())
+        && isValidTalentProgressSnapshot(request.resource.data, userId)
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
     }
   }
 }

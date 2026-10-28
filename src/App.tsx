@@ -613,6 +613,7 @@ export default function App() {
             onOpenChallenges={() => setIsChallengesModalOpen(true)}
             onOpenWallet={() => setIsWalletOpen(true)}
             onOpenCreatorContentStudio={() => setIsCreatorContentStudioOpen(true)}
+            onOpenReferralModal={() => setIsReferralModalOpen(true)}
           />
         )}
 

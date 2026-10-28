@@ -23,7 +23,11 @@
  */
 
 import { financialLedger, LedgerEntry } from './ledgerService';
-import { protectedMediaService, ProtectedMediaTicket } from './protectedMediaService';
+import {
+  protectedMediaService,
+  ProtectedMediaTicket,
+  PROTECTED_MEDIA_CACHE_CONTROL,
+} from './protectedMediaService';
 import { matchAndMessagingService, PersistentMessage } from './matchAndMessagingService';
 
 export type ExclusiveMediaType = 'photo' | 'video';
@@ -287,6 +291,7 @@ export interface SignedTemporaryMediaDelivery {
   issuedAt: string;
   expiresAt: string;
   ttlSeconds: number;
+  cacheControl: string;
   ticket: ProtectedMediaTicket;
 }
 
@@ -1180,6 +1185,17 @@ class ExclusiveContentAndInterestService {
     if (changed) {
       this.writeJson(STORAGE_KEY_EXCLUSIVE_GRANTS, grants);
     }
+
+    // Revoga imediatamente todas as URLs temporárias assinadas entre os usuários bloqueados
+    const deliveries = this.readJson<SignedTemporaryMediaDelivery[]>(STORAGE_KEY_SIGNED_DELIVERIES, []);
+    for (const d of deliveries) {
+      const matchesDeliveryPair =
+        (d.buyerUserId === blockerUserId && d.creatorId === blockedUserId) ||
+        (d.buyerUserId === blockedUserId && d.creatorId === blockerUserId);
+      if (matchesDeliveryPair) {
+        protectedMediaService.revokeToken(d.tokenId, `Bloqueio entre usuários: ${reason}`);
+      }
+    }
   }
 
   public unblockUserPair(userAId: string, userBId: string): void {
@@ -1234,6 +1250,18 @@ class ExclusiveContentAndInterestService {
       accountSuspended: Boolean(params.accountSuspended),
     };
     this.writeJson(STORAGE_KEY_CREATOR_COMPLIANCE, map);
+
+    if (params.accountSuspended || !params.ageVerified18Plus || !params.consentDeclared) {
+      const deliveries = this.readJson<SignedTemporaryMediaDelivery[]>(STORAGE_KEY_SIGNED_DELIVERIES, []);
+      for (const d of deliveries) {
+        if (d.creatorId === params.creatorId) {
+          protectedMediaService.revokeToken(
+            d.tokenId,
+            'Revogação imediata por suspensão ou alteração de conformidade do criador'
+          );
+        }
+      }
+    }
   }
 
   public getCreatorComplianceStatus(creatorId: string): {
@@ -1395,7 +1423,28 @@ class ExclusiveContentAndInterestService {
     const items = this.readJson<ExclusiveMediaItem[]>(STORAGE_KEY_EXCLUSIVE_MEDIA, []);
     const existingIdx = items.findIndex((i) => i.id === newItem.id);
     if (existingIdx >= 0) {
+      const previousItem = items[existingIdx];
+      newItem.unlockCount = previousItem.unlockCount;
       items[existingIdx] = newItem;
+      if (
+        previousItem.modality !== newItem.modality ||
+        previousItem.state !== newItem.state ||
+        newItem.state !== 'published'
+      ) {
+        protectedMediaService.revokeTokensForContent(
+          newItem.id,
+          `Alteração de visibilidade/modalidade (${previousItem.modality} -> ${newItem.modality}, estado: ${newItem.state})`
+        );
+        const deliveries = this.readJson<SignedTemporaryMediaDelivery[]>(STORAGE_KEY_SIGNED_DELIVERIES, []);
+        for (const d of deliveries) {
+          if (d.mediaId === newItem.id) {
+            protectedMediaService.revokeToken(
+              d.tokenId,
+              `Alteração de modalidade/estado da mídia ${newItem.id}`
+            );
+          }
+        }
+      }
     } else {
       items.unshift(newItem);
     }
@@ -1613,6 +1662,18 @@ class ExclusiveContentAndInterestService {
     const configs = this.readJson<Record<string, CreatorVipVaultConfig>>(STORAGE_KEY_VIP_VAULT_CONFIGS, {});
     configs[params.creatorId] = updated;
     this.writeJson(STORAGE_KEY_VIP_VAULT_CONFIGS, configs);
+
+    if (!updated.isActive || !updated.ageVerified18Plus || !updated.consentDeclared) {
+      const deliveries = this.readJson<SignedTemporaryMediaDelivery[]>(STORAGE_KEY_SIGNED_DELIVERIES, []);
+      for (const d of deliveries) {
+        if (d.creatorId === params.creatorId && d.modality === 'VIP_VAULT') {
+          protectedMediaService.revokeToken(
+            d.tokenId,
+            'Cofre VIP desativado ou com restrição de conformidade'
+          );
+        }
+      }
+    }
     return updated;
   }
 
@@ -2455,6 +2516,7 @@ class ExclusiveContentAndInterestService {
       issuedAt: ticket.issuedAt,
       expiresAt: ticket.expiresAt,
       ttlSeconds: ticket.ttlSeconds,
+      cacheControl: PROTECTED_MEDIA_CACHE_CONTROL,
       ticket,
     };
 
@@ -2530,6 +2592,14 @@ class ExclusiveContentAndInterestService {
           reason: 'Token temporário inexistente ou revogado.',
         };
       }
+      const revoked = (protectedMediaService as any).getItem?.('jobs_security_revoked_tokens', []) || [];
+      if (Array.isArray(revoked) && revoked.includes(found.tokenId)) {
+        return {
+          allowed: false,
+          code: 'DENIED_TOKEN_REVOKED',
+          reason: 'Token temporário revogado por segurança ou alteração de permissão.',
+        };
+      }
       if (found.buyerUserId !== params.requesterUserId || found.mediaId !== params.mediaId) {
         return {
           allowed: false,
@@ -2566,6 +2636,39 @@ class ExclusiveContentAndInterestService {
       reason: 'Acesso autorizado com URL temporária assinada.',
       delivery,
     };
+  }
+
+  /**
+   * Renovação controlada de URL temporária assinada expirada (sem nova cobrança).
+   * Valida identidade, bloqueios, estado da publicação e concessão vigente antes de emitir novo token.
+   */
+  public renewSignedMediaDelivery(params: {
+    requesterUserId: string;
+    mediaId: string;
+    previousTokenId?: string;
+  }): ReturnType<ExclusiveContentAndInterestService['requestSignedMediaDelivery']> {
+    this.ensureInitialSeeds();
+
+    if (params.previousTokenId) {
+      const deliveries = this.readJson<SignedTemporaryMediaDelivery[]>(STORAGE_KEY_SIGNED_DELIVERIES, []);
+      const prev = deliveries.find((d) => d.tokenId === params.previousTokenId);
+      if (prev && (prev.buyerUserId !== params.requesterUserId || prev.mediaId !== params.mediaId)) {
+        return {
+          allowed: false,
+          code: 'DENIED_IDOR_TOKEN_MISMATCH',
+          reason: 'Renovação bloqueada por proteção anti-IDOR: o token anterior pertence a outro usuário ou mídia.',
+        };
+      }
+      protectedMediaService.revokeToken(
+        params.previousTokenId,
+        'Substituído por renovação controlada de URL temporária assinada.'
+      );
+    }
+
+    return this.requestSignedMediaDelivery({
+      requesterUserId: params.requesterUserId,
+      mediaId: params.mediaId,
+    });
   }
 
   // ==========================================================================

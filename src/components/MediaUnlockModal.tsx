@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { monetizationService } from '../services/monetizationService';
 import { ProtectedMediaViewer } from './ProtectedMediaViewer';
+import { authService } from '../utils/authService';
 
 interface MediaUnlockModalProps {
   media: VipMediaItem;
@@ -52,13 +53,15 @@ export const MediaUnlockModal: React.FC<MediaUnlockModalProps> = ({
   const hasEnoughCredits = userCredits >= media.priceCredits;
   const balanceAfter = Math.max(0, userCredits - media.priceCredits);
 
+  const currentUserId = authService.getCurrentSession()?.userId || 'current_user';
+
   // Executa o fluxo de desbloqueio atômico de acordo com RF05
   const handleExecuteUnlock = async () => {
     setIsProcessing(true);
     try {
       const idempotencyKey = `idemp_modal_unlock_${media.id}_${Date.now()}`;
       const res = await monetizationService.unlockContent({
-        userId: 'current_user',
+        userId: currentUserId,
         contentId: media.id,
         idempotencyKey,
       });
@@ -125,6 +128,7 @@ export const MediaUnlockModal: React.FC<MediaUnlockModalProps> = ({
             creatorName={creatorName}
             isUnlocked={media.isUnlocked}
             userCredits={userCredits}
+            currentUserId={currentUserId}
             aspectRatio="3/4"
             className="max-h-[440px]"
             showWatermark={true}

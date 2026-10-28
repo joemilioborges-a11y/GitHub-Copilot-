@@ -1,90 +1,130 @@
-# Plano de Implementação — Proteção de Fotos e Vídeos dos Usuários (JOBS)
+# Evolução da Auditoria em Nuvem de Talentos e Painel Administrativo de Snapshots
 
-## 1. Escopo e Diretrizes Arquiteturais
-
-Este plano estrutura a evolução incremental da proteção de mídias de usuários no **JOBS**, cobrindo controle de acesso no backend/serviços, proteção de tela nativa no Android (`FLAG_SECURE` dinâmico), endurecimento de visualização na Web (renderização em `<canvas>` para fotos, player de vídeo restrito, teaser SVG opaco para itens bloqueados e marca-d'água forense dinâmica) e validação automatizada.
-
-- **Restrição Inegociável (Fase 4):** O arquivo `src/services/ledgerService.ts` e as regras financeiras (divisão 70/20/10, pacotes de diamantes e carteiras) **não serão modificados**.
-- **Limitação Real de Plataforma Documentada:** Na Web, nenhuma aplicação consegue impedir fotografias externas da tela (câmera física apontada para o monitor) ou capturas realizadas diretamente pelo sistema operacional fora do navegador. As camadas de URL temporária assinada, renderização em `<canvas>`, bloqueio de interações nativas de salvamento e marca-d'água forense dinâmica atuam como controle de acesso, redução de superfície e dissuasão/rastreabilidade.
+Este plano detalha a evolução incremental da sincronização de progresso auditado de talentos com o Cloud Firestore durante transições de autenticação em produção e a adição de um painel administrativo de inspeção de snapshots de campanhas sazonais na seção de Criadores.
 
 ---
 
-## 2. Fase 1 — Controle de Acesso, URLs Assinadas e Miniaturas Seguras
+## User Review & Critical Decisions
 
-### 2.1. Endurecimento do Serviço de Mídia Protegida (`src/services/protectedMediaService.ts`)
-- **Política de Cache e Metadados de Entrega:** Incluir cabeçalhos/políticas explícitas de não retenção (`Cache-Control: private, no-store, no-cache, max-age=0, must-revalidate` e `Pragma: no-cache`) nos descritores de entrega de mídia assinada (`ProtectedMediaTicket` e `AuthorizedMediaAccessResponse`).
-- **Renovação Controlada de Ticket Expirado (`renewMediaTicket`):** Permitir que um usuário autenticado que ainda detenha permissão válida (mídia gratuita de perfil não bloqueado, mídia individual comprada ou Cofre VIP ativo) renove um ticket expirado sem reprocessar cobrança financeira, gerando novo `ticketId`, nova assinatura HMAC/hash e novo TTL de 15 minutos (900 segundos).
-- **Revogação Automática por Mudança de Permissão ou Visibilidade:** Adicionar `revokeTokensForContent(contentId, reason)` e `revokeTokensForCreator(creatorId, reason)` para invalidar imediatamente todas as URLs temporárias emitidas caso o criador altere a modalidade da mídia (ex.: de `FREE` para `INDIVIDUAL_UNLOCK` ou `VIP_VAULT`), despublique/remova o item ou suspenda o Cofre VIP.
-- **Segregação Estrita de Miniaturas (`getPublicTeaserUrl`):** Garantir que qualquer item bloqueado receba exclusivamente o placeholder SVG opaco codificado em memória (`data:image/svg+xml...`) com metadados mínimos, sem jamais expor a URL original ou reutilizar um token de mídia completa.
+As diretrizes de produto e arquitetura confirmadas para esta etapa são:
 
-### 2.2. Sincronização com Catálogo e Entregas Exclusivas (`src/services/exclusiveContentAndInterestService.ts`)
-- **Revogação em Mudança de Modalidade/Permissão:** Garantir que alterações de estado (`transitionMediaState`) ou de modalidade/visibilidade revoguem imediatamente os registros em `SignedTemporaryMediaDelivery` e em `protectedMediaService`.
-- **Renovação de Entrega Assinada (`renewSignedMediaDelivery`):** Expor método dedicado que revalida autenticação, ausência de bloqueio mútuo (`isPairBlocked`), estado `published + approved` e vigência do grant antes de emitir uma nova URL temporária assinada quando o token anterior expirar.
-
-### 2.3. Regras de Segurança do Firestore (`firestore.rules`)
-- Adicionar regras explícitas para as coleções de metadados de concessão e entregas assinadas (`media_access_grants` e `signed_media_deliveries`), assegurando que somente o próprio comprador autenticado (`request.auth.uid == resource.data.buyerUserId`) ou o criador titular possa ler seus próprios registros de acesso, bloqueando leitura pública ou cruzada (anti-IDOR no banco).
+- **Reconciliação Automática de Snapshots Locais ao Autenticar**: Quando o participante opera em **Modo Produção** sem sessão ativa no Firebase Auth, o snapshot de progresso validado permanece em estado de auditoria local (`synced_local_audit`). Assim que `onAuthStateChanged` detecta uma sessão autenticada, o sistema reconcilia e grava automaticamente os snapshots locais pendentes na coleção protegida de progresso de talentos do usuário autenticado, além de disponibilizar um botão direto de autenticação Google na barra de status de produção.
+- **Painel Administrativo de Auditoria Integrado em Criadores**: O painel administrativo central passa a contar com uma aba dedicada dentro da seção **Criadores** para auditar os snapshots de progresso de talentos (`talent_progress`), oferecendo busca textual por identificador ou perfil, filtros combinados (perspectiva de atuação, nível gamificado, metas concluídas e origem Nuvem vs. Auditoria Local) e um inspetor de payload JSON canônico.
+- **Isolamento Contábil e de Ambiente Inalterado**: Nenhuma operação de gamificação ou sincronização de progresso gera lançamentos no livro-razão financeiro (`ledger_entries`), e o **Modo Simulação** permanece estritamente bloqueado contra gravações remotas no Firestore.
 
 ---
 
-## 3. Fase 2 — Proteção Dinâmica no Android (`FLAG_SECURE`)
+## 1. Overview & Core Concept
 
-### 3.1. Plugin Nativo Capacitor no Android (`android/app/src/main/java/com/jobs/app/MainActivity.java`)
-- Substituir a aplicação estática e indiscriminada de `FLAG_SECURE` no `onCreate` por um plugin Capacitor embutido (`JobsScreenSecurityPlugin`) registrado na `MainActivity`, com suporte a:
-  - `enableSecureScreen()`: aplica `getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE)` na UI Thread ao entrar em qualquer tela ou modal que exiba mídia protegida (impedindo screenshot, gravação de tela e miniatura no seletor de aplicativos recentes do Android).
-  - `disableSecureScreen()`: executa `getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE)` na UI Thread quando o usuário sai de todas as telas/modais de mídia protegida, evitando bloqueio indevido em telas comuns (ex.: configurações, carteira ou login).
+A seção **"Seu talento vale muito!"** já apura os 5 desafios obrigatórios a partir dos contadores reais da plataforma quando em Modo Produção e valida cada snapshot contra regras estritas de esquema. No entanto, dois pontos operacionais exigiam evolução:
 
-### 3.2. Serviço Bridge TypeScript com Contagem de Referência (`src/services/screenSecurityService.ts`)
-- Criar `src/services/screenSecurityService.ts` com um gerenciador de escopos ativos (`acquireSecureScreenScope(scopeId)` / `releaseSecureScreenScope(scopeId)`) e hook React `useSecureScreen(isActive, scopeName)`:
-  - Ativa `FLAG_SECURE` imediatamente quando o primeiro componente de mídia protegida entra em exibição (`activeScopes.size === 1`).
-  - Mantém `FLAG_SECURE` ativo se houver sobreposição (ex.: aba Cofre aberta + modal de visualização aberto) e só remove a flag quando o último escopo protegido é desmontado (`activeScopes.size === 0`).
-  - Registra estado auditável para inspeção automatizada nos testes de ciclo de vida.
+1. **Continuidade entre Sessão Visitante e Sessão Autenticada**: Como as regras de segurança do banco de dados exigem que o documento pertença ao próprio usuário autenticado (`isOwner`) ou a um administrador verificado (`isAdmin`), um participante que acumula atividade auditada antes de fazer login ficava retido em `synced_local_audit` até acionar manualmente uma nova sincronização após autenticar-se.
+2. **Visibilidade Administrativa para Campanhas Sazonais**: Administradores verificados necessitam de uma visão consolidada para inspecionar os snapshots de progresso dos criadores e colaboradores, verificar a integridade dos contadores de mídias aprovadas, conexões, transmissões ao vivo e dias ativos, e auditar o documento bruto sem depender de consultas externas ao console do banco.
 
 ---
 
-## 4. Fase 3 — Proteção e Dissuasão na Web (Canvas, Vídeo e Marca-d'Água)
+## 2. User Experience & Visual Design
 
-### 4.1. Evolução do Visualizador Protegido (`src/components/ProtectedMediaViewer.tsx`)
-- **Renderização de Fotos em `<canvas>`:** Em vez de manter uma tag `<img src="...">` exposta no DOM para fotos desbloqueadas, carregar a imagem a partir da URL autorizada em memória e desenhá-la em um elemento `<canvas>` responsivo com a marca-d'água forense dinâmica renderizada diretamente nos pixels do canvas (além da camada de proteção contra clique direito, `dragstart`, `selectstart`, `copy` e `contextmenu`).
-- **Player de Vídeo Endurecido:** Quando `mediaType === 'video'`, renderizar `<video controls controlsList="nodownload nofullscreen noremoteplayback" disablePictureInPicture onContextMenu={(e) => e.preventDefault()}>` envolto pelo escudo anti-captura e sobreposto pela marca-d'água forense dinâmica.
-- **Marca-d'Água Forense Dinâmica sem PII Sensível:** Exibir identificador ofuscado do visualizador (`obfuscateUserIdForWatermark(viewerUserId)`), código curto do ticket/sessão (`ticketId`) e carimbo de tempo compacto, sem expor e-mail, CPF, telefone ou token bruto.
-- **Tratamento de Expiração e Renovação Transparente:** Monitorar o TTL do ticket assinado e oferecer renovação imediata (`Renovar Acesso Seguro`) ou renovação automática se o usuário ainda detiver direito de acesso, bloqueando a exibição imediatamente caso a permissão tenha sido revogada ou o usuário tenha sido bloqueado.
+A interface segue a estética escura de alta precisão do JOBS, com tipografia tabular (`tabular-nums`) para todos os contadores de auditoria, separação semântica clara entre estados de sincronização e hierarquia visual de elevação única.
 
-### 4.2. Fechamento de Vazamentos de URL nos Componentes de UI
-- **`src/components/ChatView.tsx`:**
-  - Quando `msg.vipMedia.isUnlocked === false`, substituir `<img src={msg.vipMedia.mediaUrl} />` por `protectedMediaService.getPublicTeaserUrl(...)` (teaser SVG opaco sem expor a URL real no DOM).
-  - Quando `msg.vipMedia.isUnlocked === true`, emitir ticket assinado via `protectedMediaService` e exibir a mídia através do componente protegido com marca-d'água dinâmica e `useSecureScreen`.
-- **`src/components/screens/Screen10ProfileDetail.tsx`:**
-  - Nas abas `Exclusivo` (`INDIVIDUAL`) e `Cofre VIP` (`VIP_VAULT`), quando `item.isUnlockedForViewer === false`, usar `protectedMediaService.getPublicTeaserUrl({ id: item.id, title: item.caption })` em vez de expor a imagem no DOM apenas com filtro CSS `blur`.
-  - Ao abrir/visualizar mídia gratuita ou desbloqueada (foto ou vídeo), abrir o modal/visualizador `ProtectedMediaViewer` integrado com a URL temporária assinada, suporte a renovação de token expirado, marca-d'água dinâmica com ID real ofuscado e ativação de `useSecureScreen`.
-- **`src/components/VaultFeedView.tsx` e `src/components/DiscoverNudesView.tsx`:**
-  - Nos cards da grade, não expor `media.mediaUrl` diretamente sem ticket ativo; nos itens bloqueados manter `getPublicTeaserUrl` e nos itens desbloqueados/modal utilizar URL temporária assinada e o ID real da sessão autenticada (`authService.getCurrentSession()?.userId`) na marca-d'água e no `ProtectedMediaViewer`.
+### A. Controles de Autenticação e Reconciliação na Seção de Talentos (Modo Produção)
+- **Indicador de Sessão e Nuvem**: No cabeçalho da seção de talentos, quando em Modo Produção:
+  - Se o participante **não estiver autenticado** no Firebase Auth e o snapshot estiver em `synced_local_audit`, exibe a indicação de auditoria local validada acompanhada de uma ação direta **"Entrar com Google para salvar na nuvem"**.
+  - Ao concluir a autenticação, um observador reativo dispara imediatamente a reconciliação da fila local para a coleção remota, atualizando o estado visual para **Sincronizado no Firestore** com o horário exato da auditoria e o identificador truncado da sessão ativa.
+  - Em ambientes de teste ou janelas restritas onde o popup OAuth possa ser bloqueado pelo navegador, o sistema preserva o snapshot local intacto e exibe diagnóstico claro sem perda de estado.
 
----
-
-## 5. Fase 4 e Fase 5 — Testes Automatizados e Validação (`src/services/__tests__/protectedMediaSecurity.test.ts`)
-
-Criar suíte dedicada de testes automatizados cobrindo todos os cenários exigidos, sem alterar o `ledgerService.ts`:
-1. **Acesso autorizado:** emissão de URL temporária assinada com TTL de 15 minutos e política `Cache-Control: private, no-store`.
-2. **Bloqueio de usuário não autenticado:** recusa imediata (`UNAUTHENTICATED`) ao tentar requisitar URL assinada ou renovar ticket.
-3. **Bloqueio de usuário sem permissão (Anti-IDOR):** usuário B tentando acessar mídia exclusiva não desbloqueada ou tentando usar `ticketId`/assinatura emitida para o usuário A (`DENIED_IDOR_TOKEN_MISMATCH` / `INVALID_OR_EXPIRED_TICKET`).
-4. **Expiração e renovação de URL temporária:** rejeição após o TTL de 15 minutos (`DENIED_TOKEN_EXPIRED`) e renovação controlada bem-sucedida (`renewSignedMediaDelivery` / `renewMediaTicket`) apenas enquanto a concessão permanecer ativa.
-5. **Revogação imediata por bloqueio ou mudança de permissão:** invalidação instantânea dos tickets emitidos quando há bloqueio entre criador e visualizador (`blockUserPair` / `blockUser`) ou quando a mídia muda de estado/permissão.
-6. **Segregação de miniatura/teaser:** verificação de que itens bloqueados retornam apenas o teaser SVG opaco (`data:image/svg+xml...`) e nunca expõem `privateMasterUrl` ou `mediaUrl` original.
-7. **Ciclo de vida do `FLAG_SECURE` dinâmico (`screenSecurityService`):** ativação ao entrar em escopo protegido, manutenção durante múltiplos escopos simultâneos e remoção exata ao sair de todas as telas protegidas.
-8. **Marca-d'água forense segura:** verificação de que o texto gerado contém apenas identificadores ofuscados e código de sessão, sem vazar dados pessoais sensíveis.
+### B. Aba de Auditoria de Progresso de Talentos em Criadores (Painel Central Admin)
+- **Navegação Contextual**: Integrada como sub-aba na seção **7. Criadores** do Painel Central do Administrador.
+- **Resumo Executivo de Auditoria (KPI Strip)**:
+  - Total de snapshots auditados disponíveis (Nuvem Firestore + Auditoria Local da sessão).
+  - Quantidade de participantes com todas as 5 metas concluídas no ciclo.
+  - Pontuação gamificada média (claramente rotulada como pontuação não monetária).
+  - Status da assinatura em tempo real com o banco de dados (`Ativa · Admin Verificado` ou `Leitura Local · Requer Admin Autenticado`).
+- **Barra de Busca e Filtros Combinados**:
+  - Campo de busca instantânea por `userId` ou categoria de perfil.
+  - Filtro por perspectiva: **Todos**, **Produtor de Conteúdo** ou **Colaborador**.
+  - Filtro por origem do registro: **Todos**, **Firestore (Nuvem)** ou **Auditoria Local**.
+  - Filtro por faixa de conclusão de metas: **Todas**, **Ciclo Completo (5/5)**, **Em Andamento (1–4/5)** ou **Iniciante (0/5)**.
+- **Grade de Dados de Alta Densidade & Inspetor JSON**:
+  - Tabela com alinhamento numérico tabular exibindo: Participante (`userId`), Perspectiva, Nível Gamificado, Metas Concluídas (`0 de 5` a `5 de 5`), Contadores Auditados (Mídias, Ações Colab, Interações, Lives, Dias Ativos, Engajamento), Pontos (`Pts`), Origem/Status e Horário da última atualização.
+  - Ação **"Inspecionar JSON"** em cada linha, abrindo um painel lateral ou gaveta expansível que exibe o payload canônico validado contra o esquema `TalentProgressSnapshot`, a chave de coleção `/talent_progress/{userId}` e o selo de conformidade de isolamento contábil (zero vínculo com `ledger_entries`).
+  - Ação de **Exportação CSV** dos snapshots filtrados para conciliação de campanhas sazonais.
 
 ---
 
-## 6. Resumo dos Arquivos Afetados
+## 3. Key Product Decisions & Trade-Offs
 
-- `src/services/protectedMediaService.ts` (renovação de ticket, política `no-store`, revogação por mídia/criador, geração de marca-d'água forense com sessão)
-- `src/services/exclusiveContentAndInterestService.ts` (renovação de URL temporária assinada e revogação automática de tokens ao alterar modalidade/visibilidade)
-- `src/services/screenSecurityService.ts` *(novo)* (gerenciador de ciclo de vida do `FLAG_SECURE` no Android com hook `useSecureScreen`)
-- `android/app/src/main/java/com/jobs/app/MainActivity.java` (plugin Capacitor `JobsScreenSecurity` para ativar/remover `FLAG_SECURE` por tela protegida)
-- `src/components/ProtectedMediaViewer.tsx` (renderização de fotos em `<canvas>` com marca-d'água embutida, suporte a `<video>` protegido, renovação de URL expirada e integração com `useSecureScreen`)
-- `src/components/ChatView.tsx` (substituição de imagem borrada exposta no DOM por teaser opaco seguro e visualização protegida ao desbloquear)
-- `src/components/screens/Screen10ProfileDetail.tsx` (teaser opaco para mídias bloqueadas e modal `ProtectedMediaViewer` com URL assinada e renovação para fotos e vídeos desbloqueados)
-- `src/components/VaultFeedView.tsx` (uso de URL temporária assinada, `useSecureScreen` e ID real do usuário autenticado)
-- `src/components/DiscoverNudesView.tsx` (uso de `ProtectedMediaViewer`, URL temporária assinada, `useSecureScreen` e ID real do usuário autenticado)
-- `firestore.rules` (regras anti-IDOR para documentos de concessão e entregas assinadas de mídia)
-- `src/services/__tests__/protectedMediaSecurity.test.ts` *(novo)* (suíte completa de testes de segurança de mídia, expiração, renovação, revogação, anti-IDOR e ciclo de vida `FLAG_SECURE`)
+- **Fila de Reconciliação Local Determinística vs. Gravação Anônima**:
+  - *Decisão*: Manter o bloqueio contra gravações anônimas no banco de dados e armazenar o snapshot validado em fila local (`synced_local_audit`) até que `onAuthStateChanged` confirme um `uid` real.
+  - *Justificativa*: Preserva o princípio do menor privilégio nas regras de segurança (`isOwner(userId) || isAdmin()`), evita poluição de documentos órfãos no Firestore e garante que nenhuma atividade legítima realizada antes do login seja perdida.
+- **Leitura Administrativa Híbrida (Tempo Real Nuvem + Snapshots Locais Auditados)**:
+  - *Decisão*: O painel administrativo assina a coleção remota `/talent_progress` quando o administrador está autenticado no Firebase Auth e, complementarmente, mescla os snapshots auditados localmente em memória/storage da sessão de produção, identificando explicitamente a origem de cada registro (`cloud` vs. `local_audit`).
+  - *Justificativa*: Permite que o administrador audite tanto os registros persistidos no Firestore quanto o snapshot de produção corrente durante auditorias locais sem simular ou fabricar dados de nuvem.
+
+---
+
+## 4. Technical Architecture & Data Strategy
+
+### A. System Architecture Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         CAMADA DE INTERFACE (UI)                             │
+│                                                                              │
+│  ┌────────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │   Seção "Seu talento vale muito!"  │  │  Painel Central Admin          │  │
+│  │   - Status Nuvem / Auditoria Local │  │  (Seção 7: Criadores)          │  │
+│  │   - Botão Login Google (Produção)  │  │  - Aba Auditoria de Talentos   │  │
+│  │   - Sincronização Manual & Auto    │  │  - Busca, Filtros & JSON View  │  │
+│  └─────────────────┬──────────────────┘  └───────────────┬────────────────┘  │
+└────────────────────┼─────────────────────────────────────┼───────────────────┘
+                     │                                     │
+                     ▼                                     ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│               SERVIÇO DE AUDITORIA E RECONCILIAÇÃO DE TALENTOS               │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │ • Coleta determinística dos 5 desafios (Mídias, Chat, Lives, Semana)   │  │
+│  │ • Fila de snapshots pendentes (synced_local_audit) em Modo Produção    │  │
+│  │ • Listener de transição de Auth: reconcilia fila local -> uid real     │  │
+│  │ • Agregador de leitura administrativa (Snapshots Nuvem + Local Audit)  │  │
+│  └─────────────────┬─────────────────────────────────────┬────────────────┘  │
+└────────────────────┼─────────────────────────────────────┼───────────────────┘
+                     │                                     │
+                     ▼                                     ▼
+┌───────────────────────────────────────┐  ┌───────────────────────────────────┐
+│     FIREBASE AUTH & CLOUD FIRESTORE   │  │      GUARDA DE ISOLAMENTO         │
+│                                       │  │                                   │
+│ • onAuthStateChanged / Google Sign-In │  │ • Bloqueia Modo Simulação         │
+│ • Coleção: /talent_progress/{userId}  │  │ • Zero escrita em /ledger_entries │
+│ • Regras: isOwner(userId) || isAdmin()│  │ • Pontos (Pts) != R$ / 💎         │
+└───────────────────────────────────────┘  └───────────────────────────────────┘
+```
+
+### B. Data Model & Reconciliação
+
+1. **Registro de Snapshot Auditado para Inspeção Administrativa (`AuditedTalentAdminRecord`)**:
+   - `userId`: Identificador do participante (`uid` do Firebase Auth ou identificador local auditado).
+   - `role`: `'produtor_conteudo' | 'colaborador'`.
+   - `environmentMode`: `'production'` (registros de simulação nunca entram na listagem administrativa de produção).
+   - `source`: `'firestore_cloud' | 'local_audit_pending'`.
+   - `cloudPersisted`: Booleano indicando confirmação de gravação remota no Firestore.
+   - `collectionPath`: Caminho canônico `/talent_progress/{userId}`.
+   - `approvedPublishedMediaCount`, `collaboratorVerifiedActionsCount`, `eligibleMutualAndChatInteractionsCount`, `validLiveSessionsCount`, `weeklyActiveDaysCount`, `eligibleEngagementEventsCount`: Contadores inteiros não negativos auditados.
+   - `pontosConquistados`: Pontuação gamificada (`0` a `1000000`).
+   - `levelNumber`: Nível gamificado (`1` a `10`).
+   - `desafiosConcluidosCount`: Total de desafios concluídos (`0` a `5`).
+   - `updatedAtIso`: Carimbo de tempo ISO da última auditoria/sincronização.
+   - `schemaValid`: Verificação local de conformidade estrita com `isValidTalentProgressSnapshot`.
+
+2. **Assinatura de Listagem Administrativa no Firestore**:
+   - Adição de um leitor/assinante para a coleção `/talent_progress` ordenado ou limitado com tratamento seguro de permissões (`OperationType.LIST`), permitindo que administradores autenticados recebam atualizações em tempo real dos documentos gravados na nuvem e que sessões sem privilégio remoto de admin operem de forma resiliente exibindo o diagnóstico de permissão e os snapshots locais auditados.
+
+### C. Interactive State & Action Mapping
+
+- **Transição `synced_local_audit` $\rightarrow$ `synced_cloud` ao Autenticar**:
+  - Quando o usuário clica em **"Entrar com Google"** na seção de talentos (ou quando o estado de autenticação do Firebase muda de `null` para um `FirebaseUser` válido enquanto em Modo Produção), o serviço migra os contadores auditados e dispara automaticamente a gravação de `/talent_progress/{user.uid}` para as perspectivas com snapshot local pendente, atualizando o estado da interface para `synced_cloud`.
+- **Filtros e Inspetor JSON no Painel Administrativo**:
+  - Alterar o texto de busca ou qualquer seletor de filtro recalcula imediatamente a lista exibida e os contadores de resumo sem recarregar a página.
+  - Clicar em **"Ver JSON"** abre o inspetor detalhado do registro selecionado, com opção de copiar o JSON auditado para a área de transferência e verificar todos os 14 campos exigidos pela regra `isValidTalentProgressSnapshot`.
+  - Clicar em **"Sincronizar Agora"** dentro do painel administrativo (quando autenticado) força uma nova rodada de reconciliação com o Firestore e registra a ação no log de auditoria administrativa.

@@ -3,6 +3,9 @@ import { DiscoverNudeItem, LiveGender, LiveSexualOrientation } from '../types';
 import { Lock, Unlock, Sparkles, Coins, Heart, Check, Flame, X, Filter, RotateCcw, User, ShieldCheck, EyeOff } from 'lucide-react';
 import { trackEvent } from '../utils/analytics';
 import { protectedMediaService, obfuscateUserIdForWatermark } from '../services/protectedMediaService';
+import { useSecureScreen } from '../services/screenSecurityService';
+import { authService } from '../utils/authService';
+import { ProtectedMediaViewer } from './ProtectedMediaViewer';
 
 interface DiscoverNudesViewProps {
   nudes: DiscoverNudeItem[];
@@ -23,6 +26,7 @@ export const DiscoverNudesView: React.FC<DiscoverNudesViewProps> = ({
   const [revealingId, setRevealingId] = useState<string | null>(null);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [tipSuccess, setTipSuccess] = useState<string | null>(null);
+  const currentUserId = authService.getCurrentSession()?.userId || 'current_user';
 
   // Filters by Gender / Sex and Sexual Orientation
   const [genderFilter, setGenderFilter] = useState<'todos' | LiveGender>('todos');
@@ -40,6 +44,10 @@ export const DiscoverNudesView: React.FC<DiscoverNudesViewProps> = ({
   });
 
   const isFilterActive = genderFilter !== 'todos' || orientationFilter !== 'todas' || statusFilter !== 'todos';
+  useSecureScreen(
+    Boolean(selectedItem) || filteredNudes.some((n) => n.isUnlocked),
+    'discover_nudes_view'
+  );
 
   const handleResetFilters = () => {
     setGenderFilter('todos');
@@ -420,32 +428,30 @@ export const DiscoverNudesView: React.FC<DiscoverNudesViewProps> = ({
               </button>
             </div>
 
-            {/* Pristine Protected Image com Marca-d'água Forense */}
+            {/* Pristine Protected Image com Canvas + Marca-d'água Forense + URL Assinada */}
             <div
               className="relative aspect-[3/4] max-h-[520px] w-full bg-black overflow-hidden flex items-center justify-center select-none"
               onContextMenu={(e) => e.preventDefault()}
             >
-              <img
-                src={selectedItem.mediaUrl}
-                alt={selectedItem.title}
-                draggable={false}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover pointer-events-none"
+              <ProtectedMediaViewer
+                media={{
+                  id: selectedItem.id,
+                  title: selectedItem.title,
+                  description: selectedItem.teaserHint,
+                  mediaUrl: selectedItem.mediaUrl,
+                  priceCredits: selectedItem.priceCredits,
+                  type: 'photo',
+                  isUnlocked: true,
+                  likesCount: selectedItem.likesCount,
+                  unlockCount: 1,
+                }}
+                creatorName={selectedItem.creatorName}
+                isUnlocked={true}
+                currentUserId={currentUserId}
+                aspectRatio="3/4"
+                className="max-h-[520px]"
+                showWatermark={true}
               />
-              {/* Marca-d'água forense diagonal semitransparente */}
-              <div
-                className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center overflow-hidden opacity-25 select-none"
-                aria-hidden="true"
-              >
-                <div className="transform -rotate-25 text-center space-y-6 tracking-widest font-mono text-[10px] font-extrabold text-white/70 drop-shadow">
-                  <p>JOBS VIP · {obfuscateUserIdForWatermark('current_user')} · CÓPIA PROIBIDA</p>
-                  <p>RASTREAMENTO FORENSE ATIVO</p>
-                </div>
-              </div>
-              <div className="absolute bottom-3 right-3 z-20 px-2 py-1 rounded bg-black/75 backdrop-blur-md text-[9px] font-mono text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                <span>JOBS VIP · {obfuscateUserIdForWatermark('current_user')}</span>
-              </div>
             </div>
 
             {/* Details & Tip Action */}

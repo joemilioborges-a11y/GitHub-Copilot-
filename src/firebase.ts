@@ -289,3 +289,113 @@ export async function syncLedgerEntrySnapshotToFirestore(entry: {
   }
 }
 
+export interface TalentProgressFirestorePayload {
+  userId: string;
+  role: 'produtor_conteudo' | 'colaborador';
+  environmentMode: 'production';
+  approvedPublishedMediaCount: number;
+  collaboratorVerifiedActionsCount: number;
+  eligibleMutualAndChatInteractionsCount: number;
+  validLiveSessionsCount: number;
+  weeklyActiveDaysCount: number;
+  eligibleEngagementEventsCount: number;
+  pontosConquistados: number;
+  levelNumber: number;
+  desafiosConcluidosCount: number;
+}
+
+/**
+ * Persists an audited TalentProgressSnapshot to Firestore (/talent_progress/{userId}).
+ * Strictly restricted to production mode and completely isolated from /ledger_entries.
+ */
+export async function syncTalentProgressToFirestore(
+  payload: TalentProgressFirestorePayload
+): Promise<boolean> {
+  if (payload.environmentMode !== 'production') {
+    throw new Error(
+      'SECURITY_VIOLATION: Tentativa bloqueada de sincronizar dados de simulação em /talent_progress.'
+    );
+  }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    return false;
+  }
+
+  const rawUid =
+    payload.userId && payload.userId !== 'current_user' ? payload.userId : currentUser.uid;
+  const safeUserId = rawUid.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const path = `talent_progress/${safeUserId}`;
+
+  try {
+    const docRef = doc(db, 'talent_progress', safeUserId);
+    const existingSnap = await getDoc(docRef);
+
+    const clampInt = (val: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, Math.round(Number.isFinite(val) ? val : min)));
+
+    const firestoreDoc: Record<string, unknown> = {
+      userId: safeUserId,
+      role: payload.role === 'colaborador' ? 'colaborador' : 'produtor_conteudo',
+      environmentMode: 'production',
+      approvedPublishedMediaCount: clampInt(payload.approvedPublishedMediaCount, 0, 1000000),
+      collaboratorVerifiedActionsCount: clampInt(
+        payload.collaboratorVerifiedActionsCount,
+        0,
+        1000000
+      ),
+      eligibleMutualAndChatInteractionsCount: clampInt(
+        payload.eligibleMutualAndChatInteractionsCount,
+        0,
+        1000000
+      ),
+      validLiveSessionsCount: clampInt(payload.validLiveSessionsCount, 0, 1000000),
+      weeklyActiveDaysCount: clampInt(payload.weeklyActiveDaysCount, 0, 7),
+      eligibleEngagementEventsCount: clampInt(payload.eligibleEngagementEventsCount, 0, 1000000),
+      pontosConquistados: clampInt(payload.pontosConquistados, 0, 1000000),
+      levelNumber: clampInt(payload.levelNumber, 1, 10),
+      desafiosConcluidosCount: clampInt(payload.desafiosConcluidosCount, 0, 5),
+      createdAt: existingSnap.exists()
+        ? existingSnap.data().createdAt || serverTimestamp()
+        : serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(docRef, firestoreDoc);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Subscribes to a participant's audited TalentProgressSnapshot in Firestore (/talent_progress/{userId}).
+ */
+export function subscribeToTalentProgressFromFirestore(
+  userId: string,
+  onData: (data: Record<string, unknown> | null) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  const safeUserId = (userId || 'current_user').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const path = `talent_progress/${safeUserId}`;
+  const docRef = doc(db, 'talent_progress', safeUserId);
+
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      onData(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+    },
+    (error) => {
+      if (onError) {
+        onError(error);
+      } else {
+        try {
+          handleFirestoreError(error, OperationType.GET, path);
+        } catch {
+          // Logged via handleFirestoreError
+        }
+      }
+    }
+  );
+}
+
