@@ -45,6 +45,7 @@ import {
   WithdrawalSimulationRecord,
 } from '../types';
 import { financialLedger } from './ledgerService';
+import { financialDomainAdapter } from './financialDomainAdapter';
 import { runtimeEnvironmentService } from './runtimeEnvironmentService';
 
 const STORAGE_KEY_ADMIN_WITHDRAWALS = 'jobs_admin_withdrawal_records_v2';
@@ -340,6 +341,15 @@ class MonetizationDomainService {
           idempotencyKey: `${params.idempotencyKey}_credit`,
           description: `Compra Aprovada: Pacote ${pkg.name} (${totalCredits} créditos)`,
         });
+        await financialDomainAdapter.syncPackagePurchaseToLedger({
+          purchaseId: newPurchase.id,
+          userId: params.userId,
+          packageId: pkg.id,
+          packageName: pkg.name,
+          creditsAmount: totalCredits,
+          priceInCents: pkg.priceInCents,
+          idempotencyKey: params.idempotencyKey,
+        });
       }
 
       this.recordAudit({
@@ -391,6 +401,15 @@ class MonetizationDomainService {
         referenceId: pur.id,
         idempotencyKey: `${pur.idempotencyKey}_approved`,
         description: `Compra Aprovada (#${pur.id}) - ${pur.creditsAmount} créditos`,
+      });
+      await financialDomainAdapter.syncPackagePurchaseToLedger({
+        purchaseId: pur.id,
+        userId: pur.userId,
+        packageId: pur.packageId,
+        packageName: pur.packageName || pur.packageId,
+        creditsAmount: pur.creditsAmount,
+        priceInCents: pur.priceInCents,
+        idempotencyKey: pur.idempotencyKey || pur.id,
       });
 
       this.recordAudit({
@@ -757,6 +776,17 @@ class MonetizationDomainService {
 
       // 6. Geração do Token Temporário de Acesso Seguro (CA05)
       const token = this.generateTemporaryToken(params.userId, params.contentId, newGrant.id);
+
+      // 7. Sincronização unificada com o livro-razão (financialLedger) via financialDomainAdapter
+      await financialDomainAdapter.syncContentUnlockToLedger({
+        grantId: newGrant.id,
+        userId: params.userId,
+        creatorId: content.creatorId,
+        contentId: content.id,
+        contentTitle: content.title,
+        priceInCredits: price,
+        idempotencyKey: params.idempotencyKey,
+      });
 
       this.recordAudit({
         actorId: params.userId,

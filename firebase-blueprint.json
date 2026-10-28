@@ -432,6 +432,139 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "PayoutSnapshot": {
+      "title": "PayoutSnapshot",
+      "description": "Authoritative production payout record synchronized with the financial ledger.",
+      "type": "object",
+      "properties": {
+        "payoutId": {
+          "type": "string",
+          "description": "Unique identifier of the payout request.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creatorId": {
+          "type": "string",
+          "description": "UID of the creator or collaborator titular of the payout.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "amountCents": {
+          "type": "number",
+          "description": "Payout amount in integer cents (minimum 5000 = R$ 50,00)."
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["BRL"],
+          "description": "Currency of the payout."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["under_review", "approved", "released", "failed", "reversed", "cancelled", "rejected"],
+          "description": "Audited state of the payout."
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["production"],
+          "description": "Must strictly be production; sandbox payouts are forbidden in Firestore."
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "description": "Deterministic idempotency key preventing duplicate payout requests.",
+          "minLength": 4,
+          "maxLength": 128
+        },
+        "externalSettlementRef": {
+          "type": "string",
+          "description": "Optional E2E banking reference when status is released.",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": [
+        "payoutId",
+        "creatorId",
+        "amountCents",
+        "currency",
+        "status",
+        "environment",
+        "idempotencyKey",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PspWebhookEventSnapshot": {
+      "title": "PspWebhookEventSnapshot",
+      "description": "Immutable cryptographically verified PSP PIX webhook receipt.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "description": "Unique PSP webhook event identifier.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "payoutId": {
+          "type": "string",
+          "description": "Target payout identifier reconciled by this webhook.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "eventType": {
+          "type": "string",
+          "enum": ["PIX_TRANSFER_SETTLED", "PIX_TRANSFER_FAILED", "PIX_TRANSFER_REVERSED"],
+          "description": "Webhook event classification."
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["production"],
+          "description": "Must strictly be production."
+        },
+        "amountCents": {
+          "type": "number",
+          "description": "Reconciled amount in integer cents."
+        },
+        "signatureVerified": {
+          "type": "boolean",
+          "description": "Confirms HMAC-SHA256 verification passed."
+        },
+        "payloadHash": {
+          "type": "string",
+          "description": "SHA-256 hash of the raw webhook payload.",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of receipt."
+        }
+      },
+      "required": [
+        "eventId",
+        "payoutId",
+        "eventType",
+        "environment",
+        "amountCents",
+        "signatureVerified",
+        "payloadHash",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -450,6 +583,14 @@
     "/ledger_entries/{entryId}": {
       "schema": "LedgerSnapshot",
       "description": "Immutable financial ledger entries restricted to verified administrators on write."
+    },
+    "/payout_records/{payoutId}": {
+      "schema": "PayoutSnapshot",
+      "description": "Authoritative production payout records with integer cents and idempotency validation."
+    },
+    "/psp_webhook_events/{eventId}": {
+      "schema": "PspWebhookEventSnapshot",
+      "description": "Immutable PSP PIX webhook receipts for anti-replay and reconciliation."
     },
     "/media_items/{mediaId}": {
       "schema": "ProtectedMediaItem",

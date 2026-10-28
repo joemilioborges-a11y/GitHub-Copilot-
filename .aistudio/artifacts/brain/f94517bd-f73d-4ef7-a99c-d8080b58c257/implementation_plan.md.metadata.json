@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de evolução incremental da seção Minha Carteira abaixo do banner da Screen08HomeDashboard, integrando saldos auditados do ledgerService (Saldo disponível, Saldo pendente, Total recebido e Última movimentação), extrato detalhado em BRL com atalho para créditos, fluxo de Solicitar saque com verificação de requisitos e proteção contra acesso cruzado entre usuários.",
-  "updatedAt":  "2026-10-28T13:22:48.463585073Z",
+  "summary":  "Plano de homologação externa, validação estrita de configuração PSP, sanitização de segredos, bloqueio fail-closed (PSP_NOT_CONFIGURED_FOR_PRODUCTION), rota Express de despacho PIX e automação das 6 verificações obrigatórias.",
+  "updatedAt":  "2026-10-28T19:30:02.374934833Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

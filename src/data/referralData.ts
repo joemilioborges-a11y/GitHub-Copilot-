@@ -1,7 +1,10 @@
 import { ReferralMember, ReferralPyramidData } from '../types';
+import { financialDomainAdapter } from '../services/financialDomainAdapter';
+import { financialLedger } from '../services/ledgerService';
 
 const REFERRAL_CAMPAIGN_ACTIVE_KEY = 'jhobs_referral_campaign_active';
 const USER_REFERRAL_DATA_KEY = 'jhobs_user_referral_data';
+const DEFAULT_REFERRAL_USER_ID = 'usr_me';
 
 // Default initial data for user's viral pyramid network
 const INITIAL_REFERRAL_MEMBERS: ReferralMember[] = [
@@ -195,6 +198,15 @@ export function simulateNewReferralJoin(level: 1 | 2 | 3 = 1): {
 
   saveUserReferralData(updated);
 
+  // Sincronização idempotente com o livro-razão (financialLedger) via adaptador de domínio
+  void financialDomainAdapter.syncReferralRewardToLedger({
+    userId: DEFAULT_REFERRAL_USER_ID,
+    referralMemberId: newMember.id,
+    referredName: newMember.name,
+    level,
+    rewardBrl: totalReward,
+  });
+
   return {
     member: newMember,
     rewardBrl: totalReward,
@@ -203,13 +215,15 @@ export function simulateNewReferralJoin(level: 1 | 2 | 3 = 1): {
 }
 
 /**
- * Executes withdrawal of referral rewards to bank account via PIX.
+ * Registers withdrawal request of referral rewards via financialDomainAdapter / financialLedger.
+ * Does NOT simulate instant Bacen SPI settlement; registers as 'under_review' with internal protocol.
  */
 export function withdrawReferralEarnings(
   amountBrl: number,
   pixKey: string,
   pixType: string,
-  bank: string
+  bank: string,
+  idempotencyKey?: string
 ): { success: boolean; endToEndId: string; newBalance: number } {
   const current = getUserReferralData();
   const validAmount = Math.min(amountBrl, current.availableForWithdrawBrl);
@@ -225,7 +239,24 @@ export function withdrawReferralEarnings(
 
   saveUserReferralData(updated);
 
-  const endToEndId = `E${Date.now()}902148${Math.floor(1000 + Math.random() * 9000)}`;
+  const deterministicKey =
+    idempotencyKey || `idem_ref_withdraw_${DEFAULT_REFERRAL_USER_ID}_${Math.round(validAmount * 100)}_${Date.now()}`;
+
+  void financialDomainAdapter.requestReferralPayoutThroughLedger({
+    userId: DEFAULT_REFERRAL_USER_ID,
+    userName: 'Usuário Colaborador JOBS',
+    amountBrl: validAmount,
+    pixKey,
+    pixType,
+    bankName: bank,
+    idempotencyKey: deterministicKey,
+  });
+
+  const ledgerPayouts = financialLedger.getPayoutRecords();
+  const matched = ledgerPayouts.find((p) => p.idempotencyKey === deterministicKey);
+  const endToEndId = matched
+    ? `REQ-REF-${matched.id.toUpperCase()}`
+    : `REQ-REF-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
   return {
     success: true,

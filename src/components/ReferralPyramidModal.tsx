@@ -166,16 +166,8 @@ export const ReferralPyramidModal: React.FC<ReferralPyramidModalProps> = ({
         onWithdrawPixDirect(withdrawAmount, pixKey, pixType, bankName);
       }
 
-      try {
-        confetti({
-          particleCount: 50,
-          spread: 60,
-          colors: ['#10b981', '#34d399', '#fbbf24'],
-        });
-      } catch (e) {}
-
-      trackEvent('referral_rewards_withdrawn_pix', { amountBrl: withdrawAmount, pixKey, bankName });
-    }, 1200);
+      trackEvent('referral_rewards_withdrawn_pix', { amountBrl: withdrawAmount, pixKey, bankName, status: 'under_review' });
+    }, 600);
   };
 
   return (
@@ -317,24 +309,27 @@ export const ReferralPyramidModal: React.FC<ReferralPyramidModalProps> = ({
               </div>
 
               {withdrawReceipt ? (
-                <div className="p-4 rounded-2xl bg-black/60 border border-emerald-500/40 space-y-3">
-                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                <div className="p-4 rounded-2xl bg-black/60 border border-amber-500/40 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
                     <CheckCircle2 className="w-5 h-5" />
-                    <span>Transferência PIX Realizada com Sucesso!</span>
+                    <span>Solicitação de Saque Registrada — Em Análise</span>
                   </div>
+                  <p className="text-[11px] text-slate-400">
+                    Sua solicitação foi protocolada para revisão de conformidade. A liquidação bancária depende de confirmação do provedor de pagamentos.
+                  </p>
                   <div className="grid grid-cols-2 gap-2 text-xs font-mono text-slate-300">
                     <div>
-                      <span className="text-slate-500 block">Valor:</span>
-                      <strong className="text-emerald-300 text-sm">
+                      <span className="text-slate-500 block">Valor Solicitado:</span>
+                      <strong className="text-amber-300 text-sm">
                         R$ {withdrawReceipt.amountBrl.toFixed(2).replace('.', ',')}
                       </strong>
                     </div>
                     <div>
-                      <span className="text-slate-500 block">Banco Destino:</span>
+                      <span className="text-slate-500 block">Banco Informado:</span>
                       <span className="text-white">{withdrawReceipt.bank}</span>
                     </div>
                     <div className="col-span-2">
-                      <span className="text-slate-500 block">ID Autenticação Bacen:</span>
+                      <span className="text-slate-500 block">Protocolo Interno da Solicitação (Status: Em Análise):</span>
                       <span className="text-[10px] text-slate-400 break-all">{withdrawReceipt.endToEndId}</span>
                     </div>
                   </div>

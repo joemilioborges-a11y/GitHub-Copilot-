@@ -136,6 +136,7 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
 
   useEffect(() => {
     if (activeTab === 'lives_challenges' || activeTab === 'dashboard' || activeTab === 'withdraw') {
+      financialLedger.ensureUnifiedWalletSandboxSeeds('current_user');
       setLiveSessions(liveStreamService.getLiveSessions());
       setCreatorLedgerSummary(financialLedger.getCreatorBalances('current_user'));
       setVrSimSnapshot(vrSimulatorService.getStateSnapshot());
@@ -504,49 +505,79 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
     setTimeout(() => setCelebrationToast(null), 4500);
   };
 
-  const handleWithdraw = (e: React.FormEvent) => {
+  const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     setWithdrawError(null);
-    if (!pixKey.trim() || withdrawCredits <= 0) return;
+    setWithdrawSuccess(null);
+
+    if (!pixKey.trim() || withdrawCredits <= 0) {
+      setWithdrawError('Informe uma chave PIX válida e um valor positivo para solicitar o saque.');
+      return;
+    }
+
+    const amountCents = Math.round(withdrawCredits * creditValueBrl * 100);
+    if (amountCents < 5000) {
+      setWithdrawError('O valor mínimo para solicitação de saque é de R$ 50,00 (500 créditos).');
+      return;
+    }
+
     if (withdrawCredits > localCreatorBalance) {
       setWithdrawError('Valor de saque maior do que o seu saldo disponível.');
       return;
     }
 
+    const pixKeyTypeMap: Record<string, 'CPF' | 'EMAIL' | 'PHONE' | 'RANDOM'> = {
+      cpf: 'CPF',
+      email: 'EMAIL',
+      telefone: 'PHONE',
+      aleatoria: 'RANDOM',
+    };
+
     setIsProcessingWithdraw(true);
-    setWithdrawProgressStep('Validando chave PIX com o Banco Central...');
+    setWithdrawProgressStep('Registrando solicitação e reservando saldo em custódia (escrow)...');
 
-    setTimeout(() => {
-      setWithdrawProgressStep('Liquidando transferência no SPI Bacen...');
-      setTimeout(() => {
-        setIsProcessingWithdraw(false);
-        const amountBrlNum = withdrawCredits * creditValueBrl;
-        onWithdrawPix(withdrawCredits, pixKey.trim(), pixType, pixBank);
-        setLocalCreatorBalance((prev) => Math.max(0, prev - withdrawCredits));
+    try {
+      financialLedger.ensureUnifiedWalletSandboxSeeds('current_user');
+      const idempotencyKey = `idemp_studio_wd_current_user_${amountCents}_${pixKey.trim()}_${Math.floor(Date.now() / 15000)}`;
+      const { payout } = await financialLedger.requestUnifiedWalletPayout({
+        userId: 'current_user',
+        userName: 'Criador JOBS',
+        actorUserId: 'current_user',
+        amountCents,
+        pixKeyType: pixKeyTypeMap[pixType] || 'CPF',
+        pixKey: pixKey.trim(),
+        holderConfirmed: true,
+        idempotencyKey,
+      });
 
-        const receipt = {
-          id: `wd_rec_${Date.now()}`,
-          endToEndId: `E00416968${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${Math.random().toString(36).substring(2, 11)}`,
-          amountBrl: amountBrlNum,
-          creditsDeducted: withdrawCredits,
-          pixKey: pixKey.trim(),
-          pixType,
-          bank: pixBank,
-          date: new Date().toLocaleString('pt-BR'),
-        };
-        setWithdrawReceipt(receipt);
+      setIsProcessingWithdraw(false);
+      setWithdrawProgressStep('');
+      const amountBrlNum = amountCents / 100;
+      onWithdrawPix(withdrawCredits, pixKey.trim(), pixType, pixBank);
+      setLocalCreatorBalance((prev) => Math.max(0, prev - withdrawCredits));
+      setCreatorLedgerSummary(financialLedger.getCreatorBalances('current_user'));
 
-        try {
-          confetti({
-            particleCount: 60,
-            spread: 70,
-            origin: { y: 0.6 },
-            colors: ['#10b981', '#34d399', '#fbbf24'],
-          });
-        } catch {}
-        playCelebrationSound();
-      }, 900);
-    }, 800);
+      setWithdrawReceipt({
+        id: payout.id,
+        endToEndId: payout.transactionId || payout.id,
+        amountBrl: amountBrlNum,
+        creditsDeducted: withdrawCredits,
+        pixKey: pixKey.trim(),
+        pixType,
+        bank: pixBank,
+        date: new Date(payout.createdAt).toLocaleString('pt-BR'),
+      });
+
+      setWithdrawSuccess(
+        `Solicitação #${payout.id} registrada em análise (status: ${payout.status}). Valor reservado em custódia aguardando confirmação do provedor de pagamentos.`
+      );
+    } catch (err: unknown) {
+      setIsProcessingWithdraw(false);
+      setWithdrawProgressStep('');
+      setWithdrawError(
+        err instanceof Error ? err.message : 'Não foi possível registrar a solicitação de saque no livro-razão.'
+      );
+    }
   };
 
   return (
@@ -1629,9 +1660,21 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
           {/* TAB 4: WITHDRAW VIA PIX */}
           {activeTab === 'withdraw' && (
             <form onSubmit={handleWithdraw} className="space-y-4">
+              {withdrawError && (
+                <div className="p-3 bg-rose-950/90 border border-rose-500/40 rounded-xl text-xs text-rose-200 text-center font-bold">
+                  {withdrawError}
+                </div>
+              )}
+
               {withdrawSuccess && (
-                <div className="p-3 bg-emerald-950/90 border border-emerald-500/40 rounded-xl text-xs text-emerald-200 text-center font-bold">
+                <div className="p-3 bg-amber-950/90 border border-amber-500/40 rounded-xl text-xs text-amber-200 text-center font-bold">
                   {withdrawSuccess}
+                </div>
+              )}
+
+              {isProcessingWithdraw && withdrawProgressStep && (
+                <div className="p-3 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-300 text-center font-mono">
+                  {withdrawProgressStep}
                 </div>
               )}
 
@@ -1643,7 +1686,7 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
                   </span>
                 </div>
                 <span className="text-xs text-slate-400 font-mono">
-                  {creatorBalanceCredits} créditos
+                  {localCreatorBalance} créditos (mín. 500 = R$ 50,00)
                 </span>
               </div>
 
@@ -1715,13 +1758,13 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
 
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Quantidade de Créditos a Sacar
+                  Quantidade de Créditos a Sacar (Mínimo: 500 créditos = R$ 50,00)
                 </label>
                 <div className="flex items-center gap-3">
                   <input
                     type="number"
-                    min={50}
-                    max={creatorBalanceCredits}
+                    min={500}
+                    max={localCreatorBalance}
                     value={withdrawCredits}
                     onChange={(e) => setWithdrawCredits(Number(e.target.value))}
                     className="w-32 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono outline-none focus:border-emerald-500"
@@ -1731,7 +1774,7 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setWithdrawCredits(creatorBalanceCredits)}
+                    onClick={() => setWithdrawCredits(localCreatorBalance)}
                     className="text-xs text-emerald-400 hover:underline cursor-pointer ml-auto"
                   >
                     Sacar Tudo
@@ -1741,11 +1784,11 @@ export const CreatorStudioModal: React.FC<CreatorStudioModalProps> = ({
 
               <button
                 type="submit"
-                disabled={creatorBalanceCredits <= 0}
+                disabled={localCreatorBalance < 500 || isProcessingWithdraw}
                 className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-40 text-slate-950 font-extrabold text-sm transition-all shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <QrCode className="w-4 h-4" />
-                <span>Confirmar Transferência PIX Instantânea</span>
+                <span>{isProcessingWithdraw ? 'Processando Solicitação...' : 'Solicitar Saque PIX (Em Análise)'}</span>
               </button>
             </form>
           )}

@@ -48,7 +48,8 @@ export type PayoutLifecycleStatus =
   | 'approved'
   | 'released'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'reversed';
 
 export interface PayoutRecord {
   id: string;
@@ -71,6 +72,7 @@ export interface PayoutRecord {
   releasedAt?: string;
   cancelledAt?: string;
   failedAt?: string;
+  reversedAt?: string;
   reason?: string;
   transactionId?: string;
   ledgerEntryId?: string;
@@ -903,12 +905,13 @@ class FinancialLedgerService {
       this.saveEntries(updatedList);
 
       // 5. Auditoria da Transação
+      const isSimMode = runtimeEnvironmentService.isSimulationMode();
       this.recordAudit({
         actorId: params.actorId,
         action: `TRANSACTION_COMMITTED:${transactionId}`,
         reason: params.description,
         ipHash: 'hash_sandbox_client_v4',
-        isSandbox: runtimeEnvironmentService.isSimulationMode(),
+        isSandbox: isSimMode,
         payload: {
           transactionId,
           idempotencyKey: params.idempotencyKey,
@@ -916,6 +919,33 @@ class FinancialLedgerService {
           totalAmount: newEntries.reduce((acc, e) => acc + e.amount, 0),
         },
       });
+
+      // 6. Sincronização Assíncrona em Produção com Cloud Firestore (Isolamento Estrito: Sandbox nunca é enviado)
+      if (!isSimMode) {
+        void (async () => {
+          try {
+            const { syncLedgerEntrySnapshotToFirestore } = await import('../firebase');
+            for (const entry of newEntries) {
+              if (!entry.isSandbox && (entry.currency === 'BRL' || entry.currency === 'CREDITS')) {
+                await syncLedgerEntrySnapshotToFirestore({
+                  entryId: entry.id,
+                  actorId: entry.actorId,
+                  operationType: entry.operationType,
+                  debitAccount: entry.debitAccount,
+                  creditAccount: entry.creditAccount,
+                  amountCents: entry.amountCents ?? Math.round(entry.amount * 100),
+                  currency: entry.currency,
+                  status: entry.status,
+                  entryHash: entry.entryHash,
+                  previousHash: entry.previousHash,
+                });
+              }
+            }
+          } catch {
+            // Mantém resiliência local caso não haja sessão autenticada de administrador no cliente
+          }
+        })();
+      }
 
       return { entries: newEntries.reverse(), isReplay: false };
   }
@@ -2438,6 +2468,29 @@ class FinancialLedgerService {
     const envSafe: PayoutEnvironment = environment === 'production' ? 'production' : 'sandbox';
     const key = this.getPayoutStorageKey(envSafe);
     getSafeStorage().setItem(key, JSON.stringify(records));
+
+    if (envSafe === 'production') {
+      void (async () => {
+        try {
+          const { syncPayoutSnapshotToFirestore } = await import('../firebase');
+          for (const rec of records.slice(0, 5)) {
+            if (!rec.isSimulation && rec.status !== 'simulated') {
+              await syncPayoutSnapshotToFirestore({
+                payoutId: rec.id,
+                creatorId: rec.creatorId,
+                amountCents: rec.amountCents,
+                status: rec.status,
+                environment: 'production',
+                idempotencyKey: rec.idempotencyKey,
+                externalSettlementRef: rec.status === 'released' ? rec.transactionId : undefined,
+              });
+            }
+          }
+        } catch {
+          // Permanece resiliente caso não haja sessão administrativa ativa no cliente
+        }
+      })();
+    }
   }
 
   public getPayoutById(payoutId: string, environment?: PayoutEnvironment): PayoutRecord | undefined {
@@ -2523,8 +2576,14 @@ class FinancialLedgerService {
     pixKeyOrAccount: string;
     idempotencyKey: string;
     environment?: PayoutEnvironment;
+    actorUserId?: string;
+    reserveImmediately?: boolean;
   }): Promise<{ payout: PayoutRecord; isReplay: boolean }> {
     return this.enqueue(async () => {
+      if (params.actorUserId) {
+        this.assertWalletAccessAuthorized(params.creatorId, params.actorUserId, 'solicitar saque');
+      }
+
       const isProd = params.environment === 'production';
       const env: PayoutEnvironment = isProd ? 'production' : 'sandbox';
 
@@ -2538,17 +2597,49 @@ class FinancialLedgerService {
         throw new Error('Valor de repasse inválido: deve ser estritamente superior a R$ 0,00.');
       }
 
-      // Validação de saldo disponível
+      const amountCents = Math.round(params.amountBrl * 100);
+
+      // Validação de saldo disponível descontando solicitações 'under_review' ainda não reservadas no ledger
       const creatorBal = this.getCreatorBalances(params.creatorId);
-      if (creatorBal.availableBrl < params.amountBrl) {
+      const pendingUnreservedCents = existingRecords
+        .filter((p) => p.creatorId === params.creatorId && p.status === 'under_review' && !p.ledgerEntryId)
+        .reduce((acc, p) => acc + p.amountCents, 0);
+      const effectiveAvailableCents = Math.max(0, Math.round(creatorBal.availableBrl * 100) - pendingUnreservedCents);
+
+      if (effectiveAvailableCents < amountCents) {
         throw new Error(
-          `Saldo insuficiente para saque: Criador possui R$ ${creatorBal.availableBrl.toFixed(2)} disponível, solicitação de R$ ${params.amountBrl.toFixed(2)}.`
+          `Saldo insuficiente para saque: Criador possui R$ ${(effectiveAvailableCents / 100).toFixed(2)} disponível livre, solicitação de R$ ${params.amountBrl.toFixed(2)}.`
         );
       }
 
-      const amountCents = Math.round(params.amountBrl * 100);
       const payoutId = `PAYOUT-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
       const now = new Date().toISOString();
+
+      let reservedTxId: string | undefined;
+      let reservedEntryId: string | undefined;
+
+      if (params.reserveImmediately) {
+        const txRes = await this._postTransactionAtomicDirect({
+          idempotencyKey: `${params.idempotencyKey}_reserve`,
+          description: `[SOLICITAÇÃO DE SAQUE] Reserva em custódia (escrow) para ${params.creatorName}`,
+          actorId: params.actorUserId || params.creatorId,
+          entries: [
+            {
+              operationType: 'PAYOUT_RESERVE',
+              debitAccount: `CREATOR_AVAILABLE_BRL:${params.creatorId}`,
+              creditAccount: `CREATOR_PAYOUT_ESCROW:${params.creatorId}`,
+              amount: Number((amountCents / 100).toFixed(2)),
+              amountCents,
+              currency: 'BRL',
+              targetCreatorId: params.creatorId,
+              referenceId: payoutId,
+              description: `Reserva contábil imediata de saque #${payoutId}`,
+            },
+          ],
+        });
+        reservedTxId = txRes.entries[0]?.transactionId;
+        reservedEntryId = txRes.entries[0]?.id;
+      }
 
       const newPayout: PayoutRecord = {
         id: payoutId,
@@ -2567,12 +2658,14 @@ class FinancialLedgerService {
         pixKeyOrAccount: params.pixKeyOrAccount,
         createdAt: now,
         updatedAt: now,
+        transactionId: reservedTxId,
+        ledgerEntryId: reservedEntryId,
         auditTrail: [
           {
             timestamp: now,
             fromStatus: 'none',
             toStatus: 'under_review',
-            actorId: params.creatorId,
+            actorId: params.actorUserId || params.creatorId,
             reason: `Solicitação de saque via ${params.payoutMethod} (Ambiente: ${env})`,
           },
         ],
@@ -2795,7 +2888,7 @@ class FinancialLedgerService {
         return { success: true, payout, isReplay: true };
       }
 
-      if (payout.status === 'released' || payout.status === 'failed') {
+      if (payout.status === 'released' || payout.status === 'failed' || payout.status === 'reversed') {
         throw new Error(`Transição de estado inválida: Payout no estado terminal '${payout.status}' não pode ser cancelado.`);
       }
 
@@ -2854,7 +2947,193 @@ class FinancialLedgerService {
             payoutId: payout.id,
             creatorId: payout.creatorId,
             previousStatus,
-            reversalPosted: previousStatus === 'approved',
+            reversalPosted: (previousStatus === 'approved' && payout.environment === 'production') || Boolean(payout.ledgerEntryId),
+          },
+        });
+      } catch (auditErr) {
+        console.warn('[ledgerService] Audit log warning:', auditErr);
+      }
+
+      return { success: true, payout, isReplay: false };
+    });
+  }
+
+  /**
+   * FALHA DE PAYOUT (Transição: under_review/approved -> failed)
+   * Registra falha operacional/bancária antes da liquidação definitiva e emite lançamento
+   * compensatório (CREATOR_PAYOUT_ESCROW -> CREATOR_AVAILABLE_BRL) caso o valor estivesse reservado.
+   */
+  public async failPayout(params: {
+    payoutId: string;
+    actorId: string;
+    reason: string;
+    idempotencyKey: string;
+    environment?: PayoutEnvironment;
+  }): Promise<{ success: boolean; payout: PayoutRecord; isReplay: boolean }> {
+    return this.enqueue(async () => {
+      const env = params.environment === 'production' ? 'production' : 'sandbox';
+      const records = this.getPayoutRecords(env);
+      const payout = records.find((p) => p.id === params.payoutId);
+      if (!payout) {
+        throw new Error(`Solicitação de payout não encontrada: ${params.payoutId}`);
+      }
+
+      if (payout.status === 'failed') {
+        return { success: true, payout, isReplay: true };
+      }
+
+      if (payout.status === 'released' || payout.status === 'cancelled' || payout.status === 'reversed') {
+        throw new Error(
+          `Transição de estado inválida: Payout no estado '${payout.status}' não pode ser marcado como 'failed'.`
+        );
+      }
+
+      if (payout.status === 'simulated') {
+        throw new Error("Transição de estado inválida: Registros com status 'simulated' não possuem transição para 'failed'.");
+      }
+
+      const previousStatus = payout.status;
+      const shouldReverseEscrow =
+        (previousStatus === 'approved' && payout.environment === 'production') || Boolean(payout.ledgerEntryId);
+
+      if (shouldReverseEscrow) {
+        await this._postTransactionAtomicDirect({
+          idempotencyKey: params.idempotencyKey,
+          description: `[FALHA DE PAYOUT] Estorno de custódia por falha bancária/operacional #${payout.id}`,
+          actorId: params.actorId,
+          entries: [
+            {
+              operationType: 'PAYOUT_REVERSAL',
+              debitAccount: `CREATOR_PAYOUT_ESCROW:${payout.creatorId}`,
+              creditAccount: `CREATOR_AVAILABLE_BRL:${payout.creatorId}`,
+              amount: payout.amountBrl,
+              amountCents: payout.amountCents,
+              currency: 'BRL',
+              targetCreatorId: payout.creatorId,
+              referenceId: payout.id,
+              description: `Estorno compensatório por falha no repasse #${payout.id} (${params.reason})`,
+            },
+          ],
+        });
+      }
+
+      payout.status = 'failed';
+      payout.updatedAt = new Date().toISOString();
+      payout.failedAt = payout.updatedAt;
+      payout.reason = params.reason;
+      payout.auditTrail.push({
+        timestamp: payout.updatedAt,
+        fromStatus: previousStatus,
+        toStatus: 'failed',
+        actorId: params.actorId,
+        reason: params.reason,
+      });
+
+      this.savePayoutRecords(records, env);
+
+      try {
+        await adminAuditService.logActivity({
+          actorId: params.actorId,
+          actorRole: 'admin',
+          action: 'FINANCIAL_FAILURE',
+          targetType: 'payout',
+          targetId: payout.id,
+          result: 'success',
+          reason: `Falha de repasse registrada: ${params.reason}`,
+          metadata: {
+            payoutId: payout.id,
+            creatorId: payout.creatorId,
+            previousStatus,
+            reversalPosted: shouldReverseEscrow,
+          },
+        });
+      } catch (auditErr) {
+        console.warn('[ledgerService] Audit log warning:', auditErr);
+      }
+
+      return { success: true, payout, isReplay: false };
+    });
+  }
+
+  /**
+   * REVERSÃO PÓS-LIQUIDAÇÃO DE PAYOUT (Transição: released -> reversed)
+   * Registra devolução bancária pós-liquidação emitindo lançamento compensatório
+   * (BANK_PIX_SETTLEMENT -> CREATOR_AVAILABLE_BRL) sem sobrescrever o histórico original.
+   */
+  public async reversePayout(params: {
+    payoutId: string;
+    actorId: string;
+    reason: string;
+    idempotencyKey: string;
+    environment?: PayoutEnvironment;
+  }): Promise<{ success: boolean; payout: PayoutRecord; isReplay: boolean }> {
+    return this.enqueue(async () => {
+      if (!params.environment || params.environment !== 'production') {
+        throw new Error('Reversão bancária pós-liquidação só é permitida em ambiente de produção explícito.');
+      }
+
+      const records = this.getPayoutRecords('production');
+      const payout = records.find((p) => p.id === params.payoutId);
+      if (!payout) {
+        throw new Error(`Solicitação de payout não encontrada: ${params.payoutId}`);
+      }
+
+      if (payout.status === 'reversed') {
+        return { success: true, payout, isReplay: true };
+      }
+
+      if (payout.status !== 'released') {
+        throw new Error(
+          `Transição de estado inválida: Reversão pós-liquidação exige status 'released', mas o registro está em '${payout.status}'.`
+        );
+      }
+
+      await this._postTransactionAtomicDirect({
+        idempotencyKey: params.idempotencyKey,
+        description: `[REVERSÃO PÓS-LIQUIDAÇÃO] Devolução bancária de repasse #${payout.id}`,
+        actorId: params.actorId,
+        entries: [
+          {
+            operationType: 'PAYOUT_REVERSAL',
+            debitAccount: 'BANK_PIX_SETTLEMENT',
+            creditAccount: `CREATOR_AVAILABLE_BRL:${payout.creatorId}`,
+            amount: payout.amountBrl,
+            amountCents: payout.amountCents,
+            currency: 'BRL',
+            targetCreatorId: payout.creatorId,
+            referenceId: payout.id,
+            description: `Estorno compensatório pós-liquidação bancária #${payout.id} (${params.reason})`,
+          },
+        ],
+      });
+
+      payout.status = 'reversed';
+      payout.updatedAt = new Date().toISOString();
+      payout.reversedAt = payout.updatedAt;
+      payout.reason = params.reason;
+      payout.auditTrail.push({
+        timestamp: payout.updatedAt,
+        fromStatus: 'released',
+        toStatus: 'reversed',
+        actorId: params.actorId,
+        reason: params.reason,
+      });
+
+      this.savePayoutRecords(records, 'production');
+
+      try {
+        await adminAuditService.logActivity({
+          actorId: params.actorId,
+          actorRole: 'admin',
+          action: 'REFUND_EXECUTE',
+          targetType: 'payout',
+          targetId: payout.id,
+          result: 'success',
+          reason: `Reversão pós-liquidação de repasse: ${params.reason}`,
+          metadata: {
+            payoutId: payout.id,
+            creatorId: payout.creatorId,
+            amountBrl: payout.amountBrl,
           },
         });
       } catch (auditErr) {

@@ -689,6 +689,218 @@ export async function runAtomicPayoutTestSuite(): Promise<{
     }
   }
 
+  // =========================================================================
+  // TESTE 11: Falha de Payout (failPayout) com estorno de custódia e proteção contra duplo saque concorrente
+  // =========================================================================
+  {
+    const start = performance.now();
+    try {
+      const creatorId = `creator_fail_${Date.now()}`;
+      await financialLedger.postLivePerformanceReward({
+        campaignId: 'camp_fail_test',
+        campaignTitle: 'Campanha Fail Test',
+        creatorId,
+        creatorName: 'Criador Fail Payout',
+        rewardBrlCents: 6000, // R$ 60,00 disponível
+        achievedMetric: 'Seed de Teste',
+        idempotencyKey: `idemp_seed_fail_${Date.now()}`,
+      });
+
+      // 1) Tentar 2 saques concorrentes de R$ 50,00 com chaves distintas (total R$ 100 > R$ 60 disponível)
+      const [firstAttempt, secondAttempt] = await Promise.allSettled([
+        financialLedger.requestPayout({
+          creatorId,
+          creatorName: 'Criador Fail Payout',
+          amountBrl: 50.0,
+          payoutMethod: 'PIX Instantâneo',
+          pixKeyOrAccount: 'pix@fail.test',
+          idempotencyKey: `idemp_conc_distinct_1_${Date.now()}`,
+          environment: 'production',
+        }),
+        financialLedger.requestPayout({
+          creatorId,
+          creatorName: 'Criador Fail Payout',
+          amountBrl: 50.0,
+          payoutMethod: 'PIX Instantâneo',
+          pixKeyOrAccount: 'pix@fail.test',
+          idempotencyKey: `idemp_conc_distinct_2_${Date.now()}`,
+          environment: 'production',
+        }),
+      ]);
+
+      const oneFulfilledOneRejected =
+        (firstAttempt.status === 'fulfilled' && secondAttempt.status === 'rejected') ||
+        (firstAttempt.status === 'rejected' && secondAttempt.status === 'fulfilled');
+
+      const fulfilledPayout =
+        firstAttempt.status === 'fulfilled'
+          ? firstAttempt.value.payout
+          : secondAttempt.status === 'fulfilled'
+          ? secondAttempt.value.payout
+          : null;
+
+      if (!fulfilledPayout) {
+        throw new Error('Nenhum dos saques concorrentes foi aceito.');
+      }
+
+      // 2) Aprovar o saque válido (reserva R$ 50,00 em CREATOR_PAYOUT_ESCROW)
+      await financialLedger.approvePayout({
+        payoutId: fulfilledPayout.id,
+        adminId: 'admin_audit',
+        idempotencyKey: `idemp_app_fail_${Date.now()}`,
+        environment: 'production',
+      });
+
+      const balDuringEscrow = financialLedger.getCreatorBalances(creatorId);
+
+      // 3) Marcar como 'failed' via failPayout (ex: chave PIX rejeitada pelo PSP)
+      const failKey = `idemp_fail_exec_${Date.now()}`;
+      const failRes = await financialLedger.failPayout({
+        payoutId: fulfilledPayout.id,
+        actorId: 'admin_audit',
+        reason: 'Chave PIX inexistente ou bloqueada no DICT',
+        idempotencyKey: failKey,
+        environment: 'production',
+      });
+
+      // 4) Repetir chamada a failPayout para comprovar idempotência
+      const failReplay = await financialLedger.failPayout({
+        payoutId: fulfilledPayout.id,
+        actorId: 'admin_audit',
+        reason: 'Chave PIX inexistente ou bloqueada no DICT',
+        idempotencyKey: failKey,
+        environment: 'production',
+      });
+
+      const balAfterFail = financialLedger.getCreatorBalances(creatorId);
+
+      const passed =
+        oneFulfilledOneRejected &&
+        balDuringEscrow.availableBrl === 10.0 &&
+        balDuringEscrow.totalWithdrawnBrl === 50.0 &&
+        failRes.payout.status === 'failed' &&
+        failRes.isReplay === false &&
+        failReplay.isReplay === true &&
+        balAfterFail.availableBrl === 60.0 &&
+        balAfterFail.totalWithdrawnBrl === 0;
+
+      results.push({
+        testNumber: 11,
+        name: 'Falha de Payout (failPayout) com estorno de custódia e bloqueio de duplo saque concorrente',
+        passed,
+        message: passed
+          ? `Aprovado: Duplo saque concorrente bloqueado e failPayout restituiu R$ 50,00 ao saldo disponível (R$ ${balAfterFail.availableBrl.toFixed(2)}) com idempotência.`
+          : 'Falha: Concorrência com chaves distintas não foi bloqueada ou failPayout não restituiu o saldo corretamente.',
+        durationMs: Math.round(performance.now() - start),
+      });
+    } catch (e: any) {
+      results.push({
+        testNumber: 11,
+        name: 'Falha de Payout (failPayout) e bloqueio de duplo saque concorrente',
+        passed: false,
+        message: `Exceção: ${e?.message || e}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    }
+  }
+
+  // =========================================================================
+  // TESTE 12: Reversão Pós-Liquidação (reversePayout: released -> reversed)
+  // =========================================================================
+  {
+    const start = performance.now();
+    try {
+      const creatorId = `creator_rev_${Date.now()}`;
+      await financialLedger.postLivePerformanceReward({
+        campaignId: 'camp_rev_test',
+        campaignTitle: 'Campanha Reverse Test',
+        creatorId,
+        creatorName: 'Criador Reverse Payout',
+        rewardBrlCents: 7500, // R$ 75,00 disponível
+        achievedMetric: 'Seed de Teste',
+        idempotencyKey: `idemp_seed_rev_${Date.now()}`,
+      });
+
+      const { payout } = await financialLedger.requestPayout({
+        creatorId,
+        creatorName: 'Criador Reverse Payout',
+        amountBrl: 55.0,
+        payoutMethod: 'PIX Instantâneo',
+        pixKeyOrAccount: 'pix@reverse.test',
+        idempotencyKey: `idemp_req_rev_${Date.now()}`,
+        environment: 'production',
+      });
+
+      await financialLedger.approvePayout({
+        payoutId: payout.id,
+        adminId: 'admin_audit',
+        idempotencyKey: `idemp_app_rev_${Date.now()}`,
+        environment: 'production',
+      });
+
+      await financialLedger.releasePayout({
+        payoutId: payout.id,
+        adminId: 'admin_audit',
+        bankingTxRef: 'E2E_SETTLED_998877',
+        idempotencyKey: `idemp_rel_rev_${Date.now()}`,
+        environment: 'production',
+      });
+
+      const balAfterRelease = financialLedger.getCreatorBalances(creatorId);
+      const entriesBeforeReverse = financialLedger.getEntries().length;
+
+      // Executar reversão pós-liquidação (released -> reversed)
+      const revKey = `idemp_post_rev_${Date.now()}`;
+      const revRes = await financialLedger.reversePayout({
+        payoutId: payout.id,
+        actorId: 'admin_audit',
+        reason: 'Devolução bancária pós-liquidação (conta destino encerrada)',
+        idempotencyKey: revKey,
+        environment: 'production',
+      });
+
+      // Replay idempotente
+      const revReplay = await financialLedger.reversePayout({
+        payoutId: payout.id,
+        actorId: 'admin_audit',
+        reason: 'Devolução bancária pós-liquidação (conta destino encerrada)',
+        idempotencyKey: revKey,
+        environment: 'production',
+      });
+
+      const balAfterReverse = financialLedger.getCreatorBalances(creatorId);
+      const entriesAfterReverse = financialLedger.getEntries().length;
+
+      const passed =
+        balAfterRelease.availableBrl === 20.0 &&
+        balAfterRelease.totalWithdrawnBrl === 55.0 &&
+        revRes.payout.status === 'reversed' &&
+        Boolean(revRes.payout.reversedAt) &&
+        revRes.isReplay === false &&
+        revReplay.isReplay === true &&
+        balAfterReverse.availableBrl === 75.0 &&
+        entriesAfterReverse === entriesBeforeReverse + 1;
+
+      results.push({
+        testNumber: 12,
+        name: 'Reversão Pós-Liquidação (reversePayout: released -> reversed) com lançamento compensatório',
+        passed,
+        message: passed
+          ? `Aprovado: Reversão pós-liquidação restituiu R$ 55,00 via lançamento compensatório sem apagar histórico (${entriesBeforeReverse} -> ${entriesAfterReverse} lançamentos).`
+          : 'Falha: Reversão pós-liquidação não restituiu saldo ou alterou lançamentos indevidamente.',
+        durationMs: Math.round(performance.now() - start),
+      });
+    } catch (e: any) {
+      results.push({
+        testNumber: 12,
+        name: 'Reversão Pós-Liquidação (reversePayout)',
+        passed: false,
+        message: `Exceção: ${e?.message || e}`,
+        durationMs: Math.round(performance.now() - start),
+      });
+    }
+  }
+
   const passed = results.filter((r) => r.passed).length;
   const failed = results.filter((r) => !r.passed).length;
 

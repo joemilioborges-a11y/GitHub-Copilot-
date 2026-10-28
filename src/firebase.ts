@@ -289,6 +289,112 @@ export async function syncLedgerEntrySnapshotToFirestore(entry: {
   }
 }
 
+/**
+ * Synchronizes an authoritative production PayoutSnapshot to Firestore (/payout_records/{payoutId}).
+ * Strictly rejects sandbox/simulated records.
+ */
+export async function syncPayoutSnapshotToFirestore(payout: {
+  payoutId: string;
+  creatorId: string;
+  amountCents: number;
+  status:
+    | 'under_review'
+    | 'approved'
+    | 'released'
+    | 'failed'
+    | 'reversed'
+    | 'cancelled'
+    | 'rejected';
+  environment: 'production' | 'sandbox';
+  idempotencyKey: string;
+  externalSettlementRef?: string;
+}): Promise<boolean> {
+  if (payout.environment !== 'production') {
+    return false;
+  }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    return false;
+  }
+
+  const safePayoutId = payout.payoutId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const safeCreatorId = payout.creatorId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const path = `payout_records/${safePayoutId}`;
+
+  try {
+    const docRef = doc(db, 'payout_records', safePayoutId);
+    const existingSnap = await getDoc(docRef);
+
+    const payload: Record<string, unknown> = {
+      payoutId: safePayoutId,
+      creatorId: safeCreatorId,
+      amountCents: Math.max(5000, Math.min(100000000, Math.round(payout.amountCents))),
+      currency: 'BRL',
+      status: payout.status,
+      environment: 'production',
+      idempotencyKey: payout.idempotencyKey.slice(0, 128),
+      createdAt: existingSnap.exists()
+        ? existingSnap.data().createdAt || serverTimestamp()
+        : serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (payout.externalSettlementRef && payout.externalSettlementRef.trim().length >= 5) {
+      payload.externalSettlementRef = payout.externalSettlementRef.trim().slice(0, 128);
+    }
+
+    await setDoc(docRef, payload);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Persists an immutable PspWebhookEventSnapshot to Firestore (/psp_webhook_events/{eventId}).
+ * Strictly restricted to verified production webhooks.
+ */
+export async function syncWebhookEventToFirestore(event: {
+  eventId: string;
+  payoutId: string;
+  eventType: 'PIX_TRANSFER_SETTLED' | 'PIX_TRANSFER_FAILED' | 'PIX_TRANSFER_REVERSED';
+  environment: 'production' | 'sandbox';
+  amountCents: number;
+  signatureVerified: boolean;
+  payloadHash: string;
+}): Promise<boolean> {
+  if (event.environment !== 'production' || !event.signatureVerified) {
+    return false;
+  }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    return false;
+  }
+
+  const safeEventId = event.eventId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const safePayoutId = event.payoutId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  const path = `psp_webhook_events/${safeEventId}`;
+
+  try {
+    const docRef = doc(db, 'psp_webhook_events', safeEventId);
+    await setDoc(docRef, {
+      eventId: safeEventId,
+      payoutId: safePayoutId,
+      eventType: event.eventType,
+      environment: 'production',
+      amountCents: Math.max(5000, Math.min(100000000, Math.round(event.amountCents))),
+      signatureVerified: true,
+      payloadHash: event.payloadHash.slice(0, 64),
+      createdAt: serverTimestamp(),
+    });
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
 export interface TalentProgressFirestorePayload {
   userId: string;
   role: 'produtor_conteudo' | 'colaborador';

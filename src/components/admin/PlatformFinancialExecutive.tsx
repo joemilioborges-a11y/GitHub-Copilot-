@@ -45,6 +45,8 @@ import {
 } from 'lucide-react';
 import { monetizationService } from '../../services/monetizationService';
 import { financialLedger, LedgerEntry } from '../../services/ledgerService';
+import { pspWebhookReconciliationService } from '../../services/pspWebhookReconciliationService';
+import { financialDomainAdapter } from '../../services/financialDomainAdapter';
 import {
   PlatformFinancialStatement,
   CreatorRankingItem,
@@ -254,10 +256,18 @@ export const PlatformFinancialExecutive: React.FC<PlatformFinancialExecutiveProp
     showToast('Relatório Financeiro Executivo exportado em CSV com sucesso!');
   };
 
-  // Simulação de Repasse Direto a Criador
+  // Simulação Isolada de Repasse Direto a Criador (Sandbox)
   const handleExecuteCreatorRepay = (creator: CreatorRankingItem) => {
+    const simRecord = financialLedger.simulatePayout({
+      creatorId: creator.creatorId,
+      creatorName: creator.publicName,
+      requestedAmountBrl: creator.pendingPaymentBrl,
+      feePercentage: 0,
+      fixedFeeBrl: 0,
+      payoutMethod: 'PIX Instantâneo (Simulação Sandbox)',
+    });
     showToast(
-      `Ordem de repasse PIX simulada de R$ ${creator.pendingPaymentBrl.toFixed(2).replace('.', ',')} para ${creator.publicName} gravada com sucesso no livro-razão!`
+      `Simulação de repasse #${simRecord.id} (status: ${simRecord.status}) de R$ ${simRecord.amountBrl.toFixed(2).replace('.', ',')} para ${creator.publicName} registrada em Sandbox (sem movimentar saldo real).`
     );
   };
 
@@ -1301,35 +1311,196 @@ export const PlatformFinancialExecutive: React.FC<PlatformFinancialExecutiveProp
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isReconciling ? 'animate-spin' : ''}`} />
-                <span>{isReconciling ? 'Conciliando com Bacen...' : 'Forçar Reconciliação'}</span>
+                <span>{isReconciling ? 'Executando Conciliação Interna...' : 'Executar Conciliação do Livro-Razão'}</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-              <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-1">
-                <span className="text-[11px] text-slate-400 font-medium">Conta Bancária Corporativa</span>
-                <p className="text-sm font-bold text-white">{financialStatement.maskedCorporateAccount}</p>
-                <span className="text-[10px] text-emerald-400 font-mono">100% Titularidade Jhobs Tecnologia S.A.</span>
-              </div>
+            {(() => {
+              const readiness = pspWebhookReconciliationService.evaluateFinancialReadinessCriteria();
+              const reconciliationReport = pspWebhookReconciliationService.reconcilePayoutRecords(environment);
+              const persistenceMatrix = pspWebhookReconciliationService.getPersistenceArchitectureComparison();
+              const unifiedMetrics = financialDomainAdapter.getReconciledExecutiveLedgerMetrics(environment);
 
-              <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-1">
-                <span className="text-[11px] text-slate-400 font-medium">Status da Conciliação</span>
-                <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>100% Conciliado e Reconciliado</span>
-                </div>
-                <span className="text-[10px] text-slate-400 font-mono">Hash: {lastReconciliationHash}</span>
-              </div>
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                    <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-1">
+                      <span className="text-[11px] text-slate-400 font-medium">Classificação de Prontidão</span>
+                      <p className="text-xs font-bold text-amber-400">
+                        {readiness.overallClassification}
+                      </p>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        PSP PIX Real: {readiness.realPspConfigured ? 'Conectado' : 'Não Configurado (Bloqueio Fail-Closed)'}
+                      </span>
+                    </div>
 
-              <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-1">
-                <span className="text-[11px] text-slate-400 font-medium">Integridade do Livro-Razão</span>
-                <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm">
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>{ledgerIntegrity.isValid ? 'Integridade Criptográfica Válida' : 'Atenção em Hashes'}</span>
+                    <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-1">
+                      <span className="text-[11px] text-slate-400 font-medium">Status da Conciliação Interna ({environment})</span>
+                      <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>
+                          {reconciliationReport.isFullyReconciled
+                            ? `${reconciliationReport.reconciledCount}/${reconciliationReport.totalPayoutsAudited} Registros Conciliados`
+                            : `${reconciliationReport.discrepanciesCount} Divergência(s) Detectada(s)`}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Webhooks HMAC validados: {reconciliationReport.processedWebhooksCount} · Ref: {lastReconciliationHash}
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-1">
+                      <span className="text-[11px] text-slate-400 font-medium">Integridade & Persistência ({unifiedMetrics.firestoreSyncMode === 'cloud_firestore_production' ? 'Cloud Firestore' : 'Sandbox Local'})</span>
+                      <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm">
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>{ledgerIntegrity.isValid ? 'Integridade Criptográfica Válida' : 'Atenção em Hashes'}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {ledgerIntegrity.checkedCount} lançamentos · Receita Reconhecida: R$ {unifiedMetrics.platformRecognizedRevenueBrl.toFixed(2).replace('.', ',')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Painel dos 9 Critérios Obrigatórios de Prontidão Financeira */}
+                  <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-xs font-bold text-white">
+                          Verificação dos 9 Critérios de Prontidão Financeira (Governança JOBS)
+                        </h4>
+                        <p className="text-[11px] text-slate-400">
+                          Nenhuma operação é classificada como pagamento PIX liquidado no SPI Bacen até que todos os 9 itens estejam comprovados em produção.
+                        </p>
+                      </div>
+                      <span className="text-[11px] font-mono text-amber-400">
+                        {readiness.criteria.filter((c) => c.isProvenForProduction).length}/9 comprovados p/ produção
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                      {readiness.criteria.map((item) => (
+                        <div
+                          key={item.id}
+                          className="p-3 rounded-xl bg-[#0f0f18] border border-slate-800/90 space-y-1.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-[11px] font-bold text-white leading-snug">
+                              {item.title}
+                            </span>
+                            <span
+                              className={`text-[10px] font-mono shrink-0 ${
+                                item.isProvenForProduction ? 'text-emerald-400' : 'text-amber-400'
+                              }`}
+                            >
+                              {item.isProvenForProduction ? 'Validado' : 'Pendente Infra'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-300 leading-relaxed">
+                            {item.evidenceSummary}
+                          </p>
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            Req. Produção: {item.remainingRequirement}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Matriz Comparativa de Persistência: Cloud SQL PostgreSQL vs Firebase Firestore */}
+                  <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-white">
+                        Matriz Arquitetural de Persistência do Livro-Razão (Cloud SQL vs. Firestore)
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Avaliação das garantias transacionais para migração do armazenamento local para banco autoritativo no servidor.
+                      </p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-[11px]">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase">
+                            <th className="py-2 pr-3">Dimensão Crítica</th>
+                            <th className="py-2 px-3">Cloud SQL (PostgreSQL)</th>
+                            <th className="py-2 px-3">Firebase Firestore</th>
+                            <th className="py-2 pl-3">Recomendação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60">
+                          {persistenceMatrix.map((row) => (
+                            <tr key={row.dimension}>
+                              <td className="py-2.5 pr-3 font-semibold text-white">{row.dimension}</td>
+                              <td className="py-2.5 px-3 text-slate-300">{row.cloudSqlPostgres}</td>
+                              <td className="py-2.5 px-3 text-slate-400">{row.firebaseFirestore}</td>
+                              <td className="py-2.5 pl-3 font-mono text-emerald-400">{row.recommendedWinner}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Checklist Executivo de Prontidão Financeira (Seções 1 a 5 — 28 Itens Auditados) */}
+                  {(() => {
+                    const checklistSections = pspWebhookReconciliationService.getExecutiveReadinessChecklist();
+                    return (
+                      <div className="p-4 rounded-2xl bg-[#141424] border border-slate-800 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                          <div>
+                            <h4 className="text-xs font-bold text-white">
+                              JOBS — Checklist Executivo de Prontidão Financeira (Seções 1 a 5)
+                            </h4>
+                            <p className="text-[11px] text-slate-400">
+                              Bloqueio obrigatório: nenhuma simulação ou registro local é apresentado como pagamento PIX real concluído.
+                            </p>
+                          </div>
+                          <span className="text-[11px] font-mono text-amber-400">
+                            Classificação: Não validado para liquidação financeira real em produção
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {checklistSections.map((sec) => (
+                            <div
+                              key={sec.sectionNumber}
+                              className="p-3.5 rounded-xl bg-[#0f0f18] border border-slate-800/90 space-y-2.5"
+                            >
+                              <div className="flex items-center justify-between border-b border-slate-800/70 pb-2">
+                                <span className="text-xs font-bold text-white">{sec.title}</span>
+                                <span className="text-[10px] font-mono text-slate-400">
+                                  {sec.items.length} itens
+                                </span>
+                              </div>
+                              <div className="space-y-2">
+                                {sec.items.map((item) => (
+                                  <div key={item.id} className="flex items-start gap-2 text-[11px]">
+                                    <CheckCircle2
+                                      className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                                        item.verificationState === 'verified_code_and_tests'
+                                          ? 'text-emerald-400'
+                                          : 'text-amber-400'
+                                      }`}
+                                    />
+                                    <div className="space-y-0.5">
+                                      <div className="text-slate-200 font-medium leading-snug">
+                                        {item.label}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 leading-relaxed">
+                                        {item.evidence}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono">{ledgerIntegrity.checkedCount} lançamentos conferidos</span>
-              </div>
-            </div>
+              );
+            })()}
           </div>
         </div>
       )}

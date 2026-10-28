@@ -8,6 +8,8 @@
 | `/users/{userId}/private/{docId}` | `UserPrivateInfo` | Private PII (`uid`, `email`, `createdAt`, `updatedAt`) | Owner or Admin read/write only (`docId == 'profile'`) |
 | `/admin_audit_logs/{eventId}` | `AdminAuditRecord` | Administrative Audit Trail | Verified Admin read & append-only create; **Immutable** (`update: false`, `delete: false`) |
 | `/ledger_entries/{entryId}` | `LedgerSnapshot` | Double-Entry Financial Ledger | Verified Admin or Actor read; **Verified Admin ONLY** append-only create; **Immutable** (`update: false`, `delete: false`) |
+| `/payout_records/{payoutId}` | `PayoutSnapshot` | Authoritative Production Payout Record | Verified Admin or Creator read; Creator can create `under_review` (`amountCents >= 5000`); Admin only can update state transitions (`delete: false`) |
+| `/psp_webhook_events/{eventId}` | `PspWebhookEventSnapshot` | Cryptographic Webhook Receipt | Verified Admin read & append-only create; **Immutable** (`update: false`, `delete: false`) |
 | `/media_items/{mediaId}` | `ProtectedMediaItem` | Creator Content Metadata | Approved read or Owner/Admin read; Creator create/update forced to `moderationStatus == 'pending'`; Admin only can set `'approved'`/`'rejected'` |
 | `/admins/{adminId}` | Admin Role Marker | System RBAC | Admin read/write only |
 

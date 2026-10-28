@@ -1,123 +1,86 @@
-# JOBS — Evolução Auditada da Seção “Minha Carteira” na Tela Inicial
+# JOBS — Homologação Externa e Bloqueio Fail-Closed de Pagamentos PIX
 
-Consolidação incremental do cartão **“Minha Carteira”** imediatamente abaixo do banner de boas-vindas da tela inicial, conectado como projeção somente leitura ao livro-razão contábil de partidas dobradas (`financialLedger`), exibindo **Saldo disponível**, **Saldo pendente**, **Total recebido**, **Última movimentação**, **Ver extrato** e **Solicitar saque** com validação de elegibilidade, idempotência e bloqueio de acesso entre usuários.
+Fortalecimento do adaptador de pagamentos PIX (`dispatchPixPayoutOrder`) com validação determinística de configuração de produção, sanitização de credenciais e segredos HMAC contra exposição em logs ou interface, endpoint de backend para despacho controlado e comprovação automatizada das 6 verificações obrigatórias, mantendo a classificação oficial `NÃO VALIDADO PARA LIQUIDAÇÃO FINANCEIRA REAL EM PRODUÇÃO`.
 
-### User Review & Critical Decisions
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> As decisões abaixo foram alinhadas na etapa de esclarecimento e governam o comportamento contábil, visual e de segurança desta entrega:
+> Nenhuma operação em Produção será enviada a provedores externos nem poderá cair em fallback silencioso para simulação ou armazenamento local. Sempre que a configuração contratual e técnica do PSP participante do SPI não estiver validada no servidor, o adaptador recusará a operação de forma *fail-closed* com o código `PSP_NOT_CONFIGURED_FOR_PRODUCTION`, preservando intactos o estado do saque e os saldos contábeis.
 
-- **Decisão Confirmada 1 — Comportamento do botão “Solicitar saque” abaixo do mínimo (R$ 50,00)**: O botão permanece acessível para transparência operacional; quando o saldo disponível for inferior a R$ 50,00 (`5000` centavos) ou faltar requisito de elegibilidade, o modal exibe claramente os critérios pendentes (valor mínimo, limite diário, titularidade PIX e saldo atual) e mantém a submissão bloqueada no cliente e no motor contábil.
-- **Decisão Confirmada 2 — Escopo do modal “Ver extrato” (BRL vs. Créditos)**: O extrato da Minha Carteira apresenta de forma dedicada as movimentações financeiras em Reais (`BRL`) — diferenciando entradas de colaboradores, repasses 70% de produtores de conteúdo, solicitações de saque (`PAYOUT_RESERVE`), liquidações (`PAYOUT_SETTLED`), estornos (`REFUND` / `PAYOUT_REVERSAL`) e ajustes (`ADMIN_ADJUSTMENT`) — e oferece um atalho integrado para abrir o extrato específico de Créditos de Consumo (`💎`), preservando a segregação contábil.
-- **Decisão Confirmada 3 — Controle de Autorização e Isolamento de Usuário**: Todas as leituras de resumo, consultas de extrato e solicitações de saque validam a identidade da sessão autenticada (`actorId` / `userId` autorizado), bloqueando e auditando qualquer tentativa de consulta ou saque sobre a carteira de terceiros.
-
----
-
-### 1. Overview & Core Concept
-
-- **What It Does**: Apresenta logo abaixo do banner principal da tela inicial um painel financeiro confiável e responsivo (**Minha Carteira**) que reflete em tempo real a posição fiduciária (`BRL`) do usuário autenticado a partir do livro-razão SHA-256, sem manter saldos paralelos na interface e sem misturar créditos virtuais de consumo (`💎`) com valores elegíveis para saque.
-- **Target Audience / Persona**: Criadores de conteúdo, colaboradores de indicação/desafios e membros autenticados da plataforma JOBS que acompanham seus ganhos, retenções antifraude (`D+14`), última transação registrada e solicitações de saque via PIX.
-- **Key Value**: Transparência contábil auditável (exibindo exatamente o que está disponível, o que está pendente em retenção/escrow, o total histórico recebido sem duplicidades e a última movimentação), combinada com proteção rigorosa contra solicitações duplicadas, condições de corrida e acesso cruzado entre contas.
+- **Decisão Confirmada 1 (Validador Fail-Closed, Sanitização de Segredos e Rota Express)**: Implementar validação estrita de pré-requisitos de produção (mTLS, OAuth 2.0, ISPB, segredo HMAC e evidência de homologação), mascaramento automático de credenciais/segredos em trilhas de auditoria e rota de backend para disparo controlado de ordens PIX.
+- **Decisão Confirmada 2 (Automação das 6 Verificações Obrigatórias)**: Comprovar na suíte automatizada todos os 6 cenários obrigatórios: ponto exato do bloqueio, recusa com configuração ausente ou inválida, zero chamadas externas realizadas, não exposição de segredos em logs/respostas, preservação inalterada do estado e saldo em Produção, e registro estruturado de evidências de homologação.
+- **Decisão Confirmada 3 (Painel de Verificação Fail-Closed e Homologação no Admin)**: Adicionar ao Painel Financeiro Executivo um bloco de auditoria das 6 verificações obrigatórias e dos pré-requisitos de homologação externa do PSP PIX.
 
 ---
 
-### 2. User Experience & Visual Design
+## 1. Overview & Core Concept
 
-- **Key User Flows**:
-  1. **Consulta Imediata na Home**: Logo abaixo do banner de boas-vindas, o usuário visualiza o cartão **Minha Carteira** com badge explícito do ambiente ativo (*Ambiente Sandbox* vs. *Produção Auditada* — com aviso claro de que o motor contábil atual opera localmente sem liquidação bancária externa automática), botão de privacidade (*Ocultar/Mostrar saldo*) e os 4 indicadores centrais:
-     - **Saldo disponível**: valor confirmado em `CREATOR_AVAILABLE_BRL` elegível para saque.
-     - **Saldo pendente**: soma transparente de valores em retenção antifraude (`D+14`) e reservas de saque em processamento (*Escrow*).
-     - **Total recebido**: total histórico acumulado de entradas válidas confirmadas, livre de duplicidades e deduzido de estornos.
-     - **Última movimentação**: cartão compacto exibindo descrição, data/horário, direção/valor (`+` / `-` em `BRL`), identificador de referência e status real da transação mais recente (ou estado informativo quando ainda não houver movimentações no ambiente).
-  2. **Acesso ao Extrato Financeiro (“Ver extrato”)**: Ao acionar **Ver extrato**, abre-se o modal de histórico detalhado com busca textual, filtro por categoria (*Todos*, *Colaboradores*, *Produtores 70%*, *Saques PIX*, *Estornos e Ajustes*) e filtro por status (*Disponível*, *Pendente / Em análise*, *Saque solicitado*, *Saque liquidado*, *Estornado*), exibindo data/hora, tipo, descrição, valor/moeda (`BRL`), status, referência (`referenceId` / `transactionId`) e chave de idempotência mascarada, além de atalho direto para a carteira de Créditos (`💎`).
-  3. **Fluxo de Saque (“Solicitar saque”)**: Ao acionar **Solicitar saque**, o modal verifica autenticação, autorização e elegibilidade (`availableBalanceCents >= 5000`). Se elegível, guia o usuário em 3 etapas (*Formulário PIX com cálculo prévio de valor bruto, tarifa R$ 0,00 e valor líquido estimado* $\rightarrow$ *Revisão e Confirmação Explícita com chave de idempotência* $\rightarrow$ *Comprovante de Solicitação em status Em Análise / under_review*). Se o saldo for inferior a R$ 50,00, exibe o painel informativo de requisitos com o botão de envio desabilitado.
-- **Visual Identity & Theme**:
-  - *Aesthetic Direction*: Dark luxury fintech integrado à estética do JOBS (`#131726` a `#101320`), com superfícies de elevação única e bordas sutis (`border-emerald-500/25` e `border-white/10`).
-  - *Color Palette & Mood*: Esmeralda (`emerald-400`) para saldo disponível e entradas confirmadas; Âmbar (`amber-300`) para retenções pendentes e avisos de ambiente Sandbox; Azul-celeste (`sky-300`) para reservas de saque em processamento (*Escrow*); Roxo (`purple-300`) exclusivamente para o indicador segregado de créditos de consumo (`💎`).
-  - *Typography & Hierarchy*: Números financeiros sempre alinhados com `tabular-nums` (`font-display` para saldos principais e `font-mono` para identificadores de transação, protocolos e chaves de idempotência).
-- **Interactive Feedback & Motion**:
-  - Estados claros para carregamento, ausência de movimentações (especialmente em modo Produção recém-inicializado), bloqueio por falta de saldo mínimo e mensagens de erro ou confirmação de idempotência.
+- **O Que Faz**: Garante que solicitações de saque em Produção sejam recusadas de modo determinístico (*fail-closed*) com o erro contratual `PSP_NOT_CONFIGURED_FOR_PRODUCTION` enquanto a contratação, o mTLS/OAuth 2.0, a rotação de segredos HMAC e o termo de homologação do PSP não estiverem integralmente validados no servidor, sem jamás recorrer a simulação como fallback nem alterar saldos ou estados de liquidação.
+- **Público-Alvo / Persona**: Engenheiros de segurança, auditores financeiros e administradores executivos responsáveis pela governança de pagamentos e prevenção de liquidações fictícias.
+- **Valor Principal**: Elimina qualquer possibilidade de falso positivo de pagamento PIX em Produção, garante zero chamadas externas não autorizadas, impede vazamento de segredos em logs ou respostas de frontend e documenta de forma auditável cada um dos 6 critérios de verificação obrigatória.
 
 ---
 
-### 3. Key Product Decisions & Trade-Offs
+## 2. User Experience & Visual Design
 
-- **Decision 1 — Projeção Contábil Unificada com Centavos Inteiros (`amountCents`)**:
-  - *Chosen Approach*: Derivar **Saldo disponível**, **Saldo pendente**, **Total recebido** e **Última movimentação** diretamente das entradas imutáveis do `financialLedger` em centavos inteiros, sincronizado em tempo real via `financialLedger.subscribe` e `runtimeEnvironmentService.subscribe`.
-  - *Why*: Elimina divergências de ponto flutuante (`IEEE 754`), impede que a interface mantenha estado financeiro próprio e garante que a alternância entre Simulação e Produção reflita imediatamente os dados isolados de cada ambiente.
-  - *Alternatives Considered*: Armazenar contadores de saldo no estado local do componente React ou somar valores na camada visual — descartado por violar a integridade contábil.
-- **Decision 2 — Autorização e Isolamento de Carteira por Sessão (`Actor Authorization Gate`)**:
-  - *Chosen Approach*: Validar no serviço contábil se o `actorId` autenticado corresponde ao titular da carteira consultada ou movimentada (`userId`), rejeitando e registrando no log de auditoria qualquer tentativa de leitura ou saque de outro usuário.
-  - *Why*: Cumpre o princípio do menor privilégio e impede exposição ou movimentação indevida de dados financeiros de terceiros.
-- **Decision 3 — Transparência sobre Natureza do Serviço de Saque**:
-  - *Chosen Approach*: Manter o registro atômico `PAYOUT_RESERVE` com status `'under_review'` (transferindo o valor de `CREATOR_AVAILABLE_BRL` para `CREATOR_PAYOUT_ESCROW`) e informar explicitamente na interface que a solicitação cria uma reserva contábil sujeita à liquidação, sem simular transferência bancária concluída.
-  - *Why*: Impede que uma solicitação pendente seja apresentada como dinheiro enviado ou pago.
+- **Fluxos de Auditoria no Painel Financeiro Executivo**:
+  1. Na aba **Conciliação & Hash-Chain**, o administrador visualiza o painel **Homologação Externa PSP PIX & Verificações Fail-Closed**, contendo o estado dos 6 pré-requisitos contratuais/técnicos do provedor e o resultado em tempo real das 6 verificações obrigatórias do bloqueio `PSP_NOT_CONFIGURED_FOR_PRODUCTION`.
+  2. Um botão de ação **Testar Bloqueio Fail-Closed (Produção)** permite executar uma verificação controlada que comprova a recusa determinística (`PSP_NOT_CONFIGURED_FOR_PRODUCTION`), confirmando zero chamadas HTTP externas (`externalNetworkCallsCount: 0`), preservação integral do status do saque (`approved` / `under_review`, nunca `released`) e ausência de exposição de segredos.
+- **Identidade Visual & Tema**:
+  - *Direção Estética*: Console financeiro corporativo de alta densidade em modo escuro (`#0F0F18` / `#141424`) com bordas de 1px (`border-slate-800`) e profundidade única.
+  - *Paleta de Cores*: Superfícies neutras frias (60% `#090912`, 30% `#141424`) e 10% de acento semântico pareado com rótulos explícitos (`text-amber-400` para bloqueio preventivo *fail-closed*, `text-emerald-400` para invariantes verificados e `text-rose-400` para recusas de segurança).
+  - *Tipografia & Hierarquia*: Títulos enxutos sem prefixos mecânicos e valores monetários, contadores de chamadas externas, códigos de erro e identificadores em fonte monoespaçada com numerais tabulares (`font-mono tabular-nums`).
 
 ---
 
-### 4. Technical Architecture & Data Strategy *(Technical Reference)*
+## 3. Key Product Decisions & Trade-Offs
 
-- **Architecture & Component Diagram**:
+- **Decisão 1: Validação Estrita de Configuração de Produção + Zero Fallback para Simulação**
+  - *Abordagem Escolhida*: Avaliar explicitamente a configuração de produção (`validateProductionPspConfig`) exigindo habilitação contratual, certificado mTLS, credenciais OAuth 2.0, segredo HMAC de produção e identificador de homologação. Se ausente, incompleta ou inválida em `production`, `dispatchPixPayoutOrder` aborta antes de qualquer transporte de rede, registra auditoria sanitizada e retorna `PSP_NOT_CONFIGURED_FOR_PRODUCTION`.
+  - *Por Quê*: Impede que configurações parciais ou variáveis de ambiente malformadas disparem chamadas externas ou induzam fallback para o fluxo de `sandbox`.
+- **Decisão 2: Sanitização Determinística de Credenciais e Segredos**
+  - *Abordagem Escolhida*: Implementar um sanitizador de metadados e mensagens (`sanitizePspConfigAndSecrets`) que remove ou mascara qualquer chave sensível (`clientSecret`, `hmacSecret`, `mtlsPrivateKey`, `accessToken`, `authorization`, `apiKey`) antes de gravar no `adminAuditService`, retornar respostas da API ou exibir diagnósticos na interface.
+  - *Por Quê*: Cumpre a exigência de que credenciais e segredos jamais sejam expostos em logs ou no frontend, mesmo durante falhas de configuração.
+- **Decisão 3: Preservação Intacta de Estado Contábil sob Recusa Fail-Closed**
+  - *Abordagem Escolhida*: Quando `dispatchPixPayoutOrder` recusa uma operação em Produção, o registro de saque mantém seu estado anterior (`under_review` ou `approved`), não gera lançamento `PAYOUT_SETTLED`, não cria saldo fictício e incrementa zero chamadas no transporte externo (`externalCallsExecuted: 0`).
+  - *Por Quê*: Garante que uma falha de configuração nunca gere confirmação financeira nem corrompa a rastreabilidade ou a idempotência do livro-razão.
+
+---
+
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+- **Diagrama de Arquitetura e Bloqueio Fail-Closed**:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                        Screen08HomeDashboard (Home)                          │
+│                 PAINEL FINANCEIRO EXECUTIVO (Admin UI)                       │
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ Top Welcome Banner (Saudação, Cidade, Plano Atual)                     │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                      │                                       │
-│                                      ▼                                       │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ HomeWalletSection ("Minha Carteira" — Abaixo do Banner)                │  │
-│  │  ├─ Indicadores Principais (tabular-nums + modo Ocultar Saldo):        │  │
-│  │  │   • Saldo Disponível (BRL)      • Saldo Pendente (Retenção+Escrow)  │  │
-│  │  │   • Total Recebido (BRL)        • Última Movimentação (Resumo+Data) │  │
-│  │  ├─ Segregação de Origens: Colaboradores vs. Produtores (70%)          │  │
-│  │  ├─ Créditos Virtuais Segregados (💎 Não sacáveis -> abre WalletModal) │  │
-│  │  └─ Ações Principais: [Ver extrato]  |  [Solicitar saque]              │  │
-│  └───────────────┬────────────────────────────────────────┬───────────────┘  │
-└──────────────────┼────────────────────────────────────────┼──────────────────┘
-                   │                                        │
-                   ▼                                        ▼
-┌─────────────────────────────────────┐  ┌─────────────────────────────────────┐
-│ Modal: Extrato Financeiro (BRL)     │  │ Modal: Solicitar Saque PIX          │
-│ • Filtros: Origem, Status e Busca   │  │ • Verificação de Auth & Saldo >= 50 │
-│ • Entradas, Saídas, Estornos,       │  │ • Etapa 1: Valor, PIX e Líquido     │
-│   Ajustes e Solicitações de Saque   │  │ • Etapa 2: Confirmação Explícita    │
-│ • ID de Referência & Idempotência   │  │ • Etapa 3: Protocolo (under_review) │
-└──────────────────┬──────────────────┘  └──────────────────┬──────────────────┘
-                   │                                        │
-                   └───────────────────┬────────────────────┘
+│  │ Bloco: Homologação Externa PSP PIX & 6 Verificações Fail-Closed        │  │
+│  │  • Status dos 6 Pré-Requisitos PSP (mTLS, OAuth2, HMAC, Homologação)   │  │
+│  │  • Status das 6 Verificações Obrigatórias + Botão de Teste Controlado  │  │
+│  └───────────────────────────────────┬────────────────────────────────────┘  │
+└──────────────────────────────────────┼───────────────────────────────────────┘
+                                       │
                                        ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                 financialLedger (FinancialLedgerService)                     │
-│  • Controle de Acesso: valida sessão/actorId contra acesso a outros usuários │
-│  • Fila Assíncrona Serializada (enqueue) + Chave de Idempotência             │
-│  • Isolamento Simulação vs. Produção (runtimeEnvironmentService)             │
-│  • Contas BRL: CREATOR_AVAILABLE_BRL | CREATOR_PENDING_BRL | PAYOUT_ESCROW   │
+│           API EXPRESS BACKEND & SERVIÇO DE CONCILIAÇÃO PSP PIX               │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │ POST /api/ledger/payouts/dispatch  ──►  dispatchPixPayoutOrder()       │  │
+│  │                                                                        │  │
+│  │  1. validateProductionPspConfig()  ──►  Verifica mTLS, OAuth2, HMAC    │  │
+│  │  2. sanitizePspConfigAndSecrets()  ──►  Redige segredos de logs/UI     │  │
+│  │  3. Guarda Fail-Closed (Produção):                                     │  │
+│  │     • Recusa imediata: errorCode = "PSP_NOT_CONFIGURED_FOR_PRODUCTION" │  │
+│  │     • Zero chamadas externas (externalCallsAttempted === 0)            │  │
+│  │     • Zero fallback para Sandbox / localStorage                        │  │
+│  │     • Estado do Payout e saldos do Ledger permanecem inalterados       │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Data Model & State**:
-  - `UnifiedWalletSummary`: expandido com `totalPendingCents` / `totalPendingBrl` (consolidando `pendingReviewCents` de retenção D+14 + `payoutReservedCents` de saques em análise, mantendo também os campos individuais detalhados) e `lastTransaction: UnifiedWalletStatementItem | null` (representando a transação BRL mais recente do usuário com descrição, timestamp ISO, direção, valor, status e referência).
-  - `UnifiedWalletStatementItem`: inclui `referenceId` explícito, `operationType`, `category` (`collaborator | content_producer | payout | refund | adjustment`), `direction` (`credit | debit`) e `status` (`available | pending_review | payout_reserved | payout_released | refunded`).
-  - `WalletAccessAuthorization`: verificação no `financialLedger` que garante que um usuário comum só possa consultar ou operar sua própria carteira, lançando erro auditado em caso de tentativa de acesso cruzado (`UNAUTHORIZED_WALLET_ACCESS`).
-
-- **Interactive Component & State Mapping**:
-  - **Assinatura Reativa Dupla**: `HomeWalletSection` subscreve simultaneamente a `financialLedger.subscribe` e `runtimeEnvironmentService.subscribe`, atualizando instantaneamente o resumo e o extrato após qualquer desbloqueio, meta, estorno, solicitação de saque ou troca de modo (Simulação $\leftrightarrow$ Produção).
-  - **Bloco “Última movimentação”**: renderizado no cartão principal com descrição truncada segura, data/hora formatada (`pt-BR`), badge de status real (*Disponível*, *Em Retenção*, *Saque em Análise*, *Liquidado*, *Estornado*), valor em `BRL` (respeitando o modo *Ocultar saldo*) e botão rápido para inspecionar no extrato. Quando não houver movimentações (ex.: conta nova em Produção), exibe mensagem clara *"Nenhuma movimentação financeira registrada neste ambiente"*.
-  - **Validação de Saque em Dupla Camada**:
-    - Na UI: se `availableBalanceCents < 5000`, o modal **Solicitar saque** exibe um aviso estruturado informando o saldo disponível atual, o valor mínimo exigido (`R$ 50,00`) e o valor faltante para habilitação, mantendo o avanço para confirmação desabilitado.
-    - No `financialLedger`: `requestUnifiedWalletPayout` valida `actorId === userId`, `amountCents >= 5000`, `amountCents <= 1000000`, `availableBalanceCents >= amountCents`, formato da chave PIX e `idempotencyKey`, debitando `CREATOR_AVAILABLE_BRL` e creditando `CREATOR_PAYOUT_ESCROW` com status `'under_review'`.
-
-- **Bateria Obrigatória de Testes Automatizados (10 Cenários Auditáveis)**:
-  1. Exibição do saldo correto (`availableBalanceBrl`, `totalReceivedPeriodBrl`, `lastTransaction`) para o usuário autenticado.
-  2. Separação contábil exata entre saldo disponível (`CREATOR_AVAILABLE_BRL`) e saldo pendente (`CREATOR_PENDING_BRL` + `CREATOR_PAYOUT_ESCROW`), além da separação de créditos `💎`.
-  3. Atualização reativa imediata após uma movimentação válida (novo repasse de produtor ou colaborador).
-  4. Extrato financeiro com valores, datas, referências, direções e estados coerentes (entradas, saídas, estornos, ajustes e saques).
-  5. Bloqueio de solicitação de saque quando o saldo disponível for inferior ao mínimo elegível (`< R$ 50,00`) ou insuficiente.
-  6. Proteção de idempotência contra solicitações de saque duplicadas (`isReplay: true` sem duplo débito) e concorrência serializada.
-  7. Tratamento de falhas de validação (chave PIX inválida, titularidade não confirmada) e manutenção do saque em estado pendente (`under_review`) sem liquidar falsamente.
-  8. Isolamento rigoroso entre dados simulados (`sandbox`) e ambiente de `production` (zero seeds sintéticos em produção).
-  9. Bloqueio de acesso indevido aos dados financeiros e saques de outros usuários (`Cross-User Access Protection`).
-  10. Verificação de integridade e compatibilidade com a `Screen08HomeDashboard` via suíte de testes, `lint_applet` e `compile_applet`.
+- **Modelo de Dados e Verificação**:
+  - `PspProductionConfigInput`: Estrutura opcional para avaliação de configuração contendo `providerName`, `contractEnabled`, `mtlsConfigured`, `oauth2Configured`, `hmacSecretConfigured`, `homologationEvidenceId`, além de possíveis campos sensíveis submetidos a teste de sanitização.
+  - `FailClosedVerificationReport`: Relatório estruturado das 6 verificações obrigatórias (`blockPointLocation`, `rejectedOnMissingOrInvalidConfig`, `zeroExternalCallsVerified`, `secretsRedactedVerified`, `ledgerAndStatusUnchangedVerified`, `homologationPrerequisitesStatus`), permitindo inspeção tanto pela suíte automatizada quanto pelo painel executivo.
+- **Mapeamento de Componentes e Estados Interativos**:
+  - O método `getFailClosedHomologationDiagnostic()` consolida os 6 pré-requisitos contratuais/técnicos do PSP e o status das 6 verificações obrigatórias.
+  - O endpoint `POST /api/ledger/payouts/dispatch` no servidor Express expõe o adaptador `dispatchPixPayoutOrder` com retorno HTTP `503 Service Unavailable` e código `PSP_NOT_CONFIGURED_FOR_PRODUCTION` quando invocado para `production`, garantindo resposta uniforme sem vazar variáveis de ambiente.

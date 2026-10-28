@@ -248,6 +248,102 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidPayoutSnapshot(data, payoutId) {
+      let requiredKeys = [
+        'payoutId',
+        'creatorId',
+        'amountCents',
+        'currency',
+        'status',
+        'environment',
+        'idempotencyKey',
+        'createdAt',
+        'updatedAt'
+      ];
+      let allowedKeys = [
+        'payoutId',
+        'creatorId',
+        'amountCents',
+        'currency',
+        'status',
+        'environment',
+        'idempotencyKey',
+        'externalSettlementRef',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(allowedKeys)
+        && data.payoutId is string
+        && data.payoutId == payoutId
+        && data.payoutId.size() >= 1 && data.payoutId.size() <= 128
+        && data.payoutId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.creatorId is string
+        && data.creatorId.size() >= 1 && data.creatorId.size() <= 128
+        && data.creatorId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.amountCents is int
+        && data.amountCents >= 5000 && data.amountCents <= 100000000
+        && data.currency is string
+        && data.currency == 'BRL'
+        && data.status is string
+        && (
+          data.status == 'under_review'
+          || data.status == 'approved'
+          || data.status == 'released'
+          || data.status == 'failed'
+          || data.status == 'reversed'
+          || data.status == 'cancelled'
+          || data.status == 'rejected'
+        )
+        && data.environment is string
+        && data.environment == 'production'
+        && data.idempotencyKey is string
+        && data.idempotencyKey.size() >= 4 && data.idempotencyKey.size() <= 128
+        && (!('externalSettlementRef' in data) || (data.externalSettlementRef is string && data.externalSettlementRef.size() >= 5 && data.externalSettlementRef.size() <= 128))
+        && (data.status != 'released' || ('externalSettlementRef' in data && data.externalSettlementRef is string && data.externalSettlementRef.size() >= 10))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPspWebhookEventSnapshot(data, eventId) {
+      let keys = [
+        'eventId',
+        'payoutId',
+        'eventType',
+        'environment',
+        'amountCents',
+        'signatureVerified',
+        'payloadHash',
+        'createdAt'
+      ];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.eventId is string
+        && data.eventId == eventId
+        && data.eventId.size() >= 1 && data.eventId.size() <= 128
+        && data.eventId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.payoutId is string
+        && data.payoutId.size() >= 1 && data.payoutId.size() <= 128
+        && data.payoutId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.eventType is string
+        && (
+          data.eventType == 'PIX_TRANSFER_SETTLED'
+          || data.eventType == 'PIX_TRANSFER_FAILED'
+          || data.eventType == 'PIX_TRANSFER_REVERSED'
+        )
+        && data.environment is string
+        && data.environment == 'production'
+        && data.amountCents is int
+        && data.amountCents >= 5000 && data.amountCents <= 100000000
+        && data.signatureVerified is bool
+        && data.signatureVerified == true
+        && data.payloadHash is string
+        && data.payloadHash.size() == 64
+        && data.payloadHash.matches('^[a-f0-9]{64}$')
+        && data.createdAt is timestamp
+        && data.createdAt == request.time;
+    }
+
     // ============================================================================
     // Admin RBAC Directory
     // ============================================================================
@@ -315,6 +411,43 @@ service cloud.firestore {
     match /ledger_entries/{entryId} {
       allow get, list: if isAdmin() || (isSignedIn() && resource.data.actorId == request.auth.uid);
       allow create: if isAdmin() && isValidLedgerSnapshot(request.resource.data, entryId);
+      allow update, delete: if false;
+    }
+
+    // ============================================================================
+    // Authoritative Production Payout Snapshots
+    // Creators can only create 'under_review' payouts for themselves; only verified
+    // administrators can transition payout status (and 'released' requires externalSettlementRef).
+    // ============================================================================
+    match /payout_records/{payoutId} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow create: if isValidPayoutSnapshot(request.resource.data, payoutId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(request.resource.data.creatorId)
+            && request.resource.data.status == 'under_review'
+          )
+        );
+      allow update: if isAdmin()
+        && isValidPayoutSnapshot(request.resource.data, payoutId)
+        && request.resource.data.payoutId == resource.data.payoutId
+        && request.resource.data.creatorId == resource.data.creatorId
+        && request.resource.data.amountCents == resource.data.amountCents
+        && request.resource.data.idempotencyKey == resource.data.idempotencyKey
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // ============================================================================
+    // Immutable Cryptographically Verified PSP PIX Webhook Receipts
+    // ============================================================================
+    match /psp_webhook_events/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && isValidPspWebhookEventSnapshot(request.resource.data, eventId);
       allow update, delete: if false;
     }
 
