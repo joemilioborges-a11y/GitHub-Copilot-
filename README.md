@@ -1,3 +1,5 @@
+JOBS
+
 #JOBS — Auditoria para integração do Google Maps
 
 Atue como engenheiro de software sênior, com foco em segurança, privacidade e preservação do projeto existente.
@@ -94,9 +96,8 @@ A proposta combina redes sociais, descoberta de perfis, porcompartilhamento de f
 
 A plataforma foi pensada para facilitar conexões entre usuários, ampliar a visibilidade de criadores e oferecer experiências de engajamento, conteúdo premium e transações digitais com maior transparência e controle.
 
-2) Versão para README do GitHub
+2) Nossa origem 
 
-# JOBS
 
 JOBS — Conectando pessoas, criando oportunidades
 
@@ -104,7 +105,7 @@ Nascemos no Brasil e nossa visão é global. O JOBS é uma plataforma digital em
 
 Nosso objetivo é construir uma experiência moderna, intuitiva e segura, oferecendo ferramentas para que usuários e criadores possam interagir, compartilhar conteúdos, descobrir oportunidades e explorar possibilidades de monetização.
 
-## Funcionalidades e módulos
+# Funcionalidades e módulos
 
 - Perfis e descoberta
 - Fotos e vídeos
@@ -115,11 +116,11 @@ Nosso objetivo é construir uma experiência moderna, intuitiva e segura, oferec
 - Creator Studio
 - Painel administrativo
 
-## Transparência e segurança
+# Transparência e segurança
 
 O JOBS prioriza proteção de dados, clareza nas cobranças, rastreabilidade financeira, prevenção de duplicidade e separação entre testes e produção.
 
-## Arquitetura e desenvolvimento
+# Arquitetura e desenvolvimento
 
 O projeto está sendo desenvolvido com foco em arquitetura modular, integração segura e evolução contínua.
 
