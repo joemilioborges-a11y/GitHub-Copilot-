@@ -1,227 +1,234 @@
-JOBS
-
-#JOBS — Auditoria para integração do Google Maps
-
-Atue como engenheiro de software sênior, com foco em segurança, privacidade e preservação do projeto existente.
-
-Objetivo futuro: integrar o Google Maps ao JOBS para permitir descoberta de pessoas por proximidade e cálculo de distância aproximada entre usuários.
-
-Nesta etapa, somente inspecione e planeje. Não altere arquivos.
-
-Examine o código disponível e identifique:
-
-1. A arquitetura atual, incluindo React/Vite e eventual Capacitor para Android.
-2. O módulo existente de descoberta, busca e filtros de usuários.
-3. Como os perfis são armazenados e consultados.
-4. Se já existe alguma funcionalidade de localização ou cálculo de distância.
-5. Como o projeto gerencia configurações, variáveis de ambiente e chaves de API.
-6. Se há infraestrutura adequada para consultar usuários por região sem expor coordenadas privadas.
-
-Proponha uma implementação incremental que:
-
-- Integre o mapa à descoberta de pessoas, sem recriar o aplicativo.
-- Permita configurar um raio de busca.
-- Calcule distâncias aproximadas sem expor endereços ou coordenadas exatas de outros usuários.
-- Solicite consentimento antes de obter ou armazenar a localização.
-- Permita desativar a descoberta por proximidade e utilizar cidade/região como alternativa.
-- Respeite os filtros e as regras de privacidade já existentes.
-- Considere a futura versão Android.
-
-Segurança:
-
-- Não inclua chaves de API diretamente no código.
-- Recomende restrições de chave, controle de custos e limites de uso.
-- Não habilite localização em segundo plano.
-- Não altere autenticação, dados financeiros, ledgerService ou regras 70/30.
-- Não instale dependências nem modifique arquivos.
-- Não declare a integração implementada ou testada.
-
-Apresente os arquivos relevantes, os riscos, as APIs do Google Maps necessárias e o menor plano de implementação. Aguarde autorização antes de alterar qualquer arquivo.
-
-
-#JOBS — Conectando pessoas, criando oportunidades
-
-Nascemos no Brasil e nossa visão é global.
-
-O JOBS é uma plataforma digital em desenvolvimento que reúne relacionamentos, descoberta de perfis, interação social, compartilhamento de conteúdo e experiências ao vivo em um único ecossistema.
-
-Nosso objetivo é construir uma experiência moderna, intuitiva e segura, oferecendo ferramentas para que usuários e criadores possam interagir, compartilhar conteúdos, descobrir oportunidades e explorar possibilidades de monetização.
-
-*Funcionalidades e módulos
-
-- Perfis e descoberta: apresentação de perfis, preferências e mecanismos de descoberta de pessoas e comunidades.
-- Fotos e vídeos: publicação e organização de conteúdos no perfil.
-- Cofre VIP: espaço exclusivo para conteúdos premium, conforme as funcionalidades disponíveis no projeto.
-- Desbloqueio individual: acesso a conteúdos mediante confirmação do preço e cobrança em créditos JOBS, conforme as regras implementadas.
-- Lives e interação: experiências ao vivo, engajamento entre participantes e recursos de gamificação.
-- Carteira virtual: gerenciamento de créditos, histórico de movimentações e diferenciação entre créditos virtuais e valores financeiros.
-- Creator Studio: ferramentas para gestão de conteúdo, análise de desempenho e acompanhamento de criadores.
-- Painel administrativo: visão operacional, monitoramento, auditoria e controle conforme os módulos implementados.
-
-*Transparência e segurança
-
-O desenvolvimento do JOBS prioriza:
-
-- Proteção de dados pessoais e controle de acesso.
-- Clareza nos preços e confirmação antes de cobranças.
-- Rastreabilidade das movimentações financeiras.
-- Prevenção de cobranças duplicadas.
-- Separação entre simulação, testes e operações reais.
-- Evolução incremental, preservando a arquitetura existente.
-- Testes e evidências antes de declarar funcionalidades prontas.
-
-*Arquitetura e desenvolvimento
-
-O projeto está sendo desenvolvido com foco em arquitetura modular, manutenção contínua, integração segura de serviços e preparação para evolução multiplataforma.
-
-As tecnologias, integrações e recursos efetivamente disponíveis devem ser confirmados pela estrutura atual do repositório.
-
-*Status do projeto
-
-"Em desenvolvimento"
-
-A publicação de uma versão não significa, por si só, que todas as funcionalidades estejam concluídas ou prontas para produção. Cada módulo deve ser validado por meio de inspeção do código, testes e verificações de segurança.
-
-*Visão de futuro
-
-Construir um ecossistema digital que conecte pessoas, incentive a criação de conteúdo e amplie oportunidades de interação, com transparência, responsabilidade e capacidade de expansão internacional.
-
-#JOBS — Conexões, conteúdo e oportunidades em um só lugar.
-
-
-1) Nossa Missão 
-
-JOBS é uma plataforma digital em desenvolvimento que conecta pessoas, conteúdos e oportunidades em um único ecossistema. 
-A proposta combina redes sociais, descoberta de perfis, porcompartilhamento de fotos e vídeos, experiências ao vivo, monetização de criadores e gestão de interações em um ambiente moderno, intuitivo e seguro.
-
-A plataforma foi pensada para facilitar conexões entre usuários, ampliar a visibilidade de criadores e oferecer experiências de engajamento, conteúdo premium e transações digitais com maior transparência e controle.
-
-2) Nossa origem 
-
-
 JOBS — Conectando pessoas, criando oportunidades
 
-Nascemos no Brasil e nossa visão é global. O JOBS é uma plataforma digital em desenvolvimento que reúne relacionamentos, descoberta de perfis, interação social, compartilhamento de conteúdo e experiências ao vivo em um único ecossistema.
+Nascemos no Brasil. Nossa visão é global!
 
-Nosso objetivo é construir uma experiência moderna, intuitiva e segura, oferecendo ferramentas para que usuários e criadores possam interagir, compartilhar conteúdos, descobrir oportunidades e explorar possibilidades de monetização.
+«JOBS é uma plataforma digital em desenvolvimento que busca conectar pessoas, conteúdos e oportunidades em um único ecossistema, combinando descoberta de perfis, interação social, compartilhamento de conteúdo, experiências ao vivo e ferramentas para criadores.»
 
-# Funcionalidades e módulos
+1. Nossa missão
 
-- Perfis e descoberta
-- Fotos e vídeos
-- Cofre VIP
-- Desbloqueio individual
-- Lives e interação
-- Carteira virtual
-- Creator Studio
-- Painel administrativo
+Construir uma experiência digital moderna, intuitiva e segura que facilite conexões entre pessoas, fortaleça comunidades e amplie oportunidades para usuários e criadores de conteúdo.
 
-# Transparência e segurança
+O JOBS pretende reunir recursos de relacionamento, descoberta de perfis, publicação de fotos e vídeos, interação em tempo real e monetização digital em uma plataforma integrada, com foco em transparência, privacidade e evolução sustentável.
 
-O JOBS prioriza proteção de dados, clareza nas cobranças, rastreabilidade financeira, prevenção de duplicidade e separação entre testes e produção.
+2. Nossa origem e visão de futuro
 
-# Arquitetura e desenvolvimento
+O JOBS nasce no Brasil com uma visão global.
 
-O projeto está sendo desenvolvido com foco em arquitetura modular, integração segura e evolução contínua.
+Nossa direção é desenvolver um ecossistema capaz de evoluir de forma modular, adaptar-se a diferentes mercados e ampliar suas possibilidades de conexão, conteúdo e oportunidades.
 
-# Status
-Em desenvolvimento.
+A expansão internacional é um objetivo estratégico futuro, que deverá considerar localização de idiomas, moedas, formatos de data, fusos horários, privacidade, moderação, pagamentos e requisitos legais de cada mercado.
 
-# Visão de futuro
+3. Principais funcionalidades e módulos
 
-Construir um ecossistema digital que conecte pessoas, incentive a criação de conteúdo e amplie oportunidades de interação com responsabilidade, transparência e potencial de expansão internacional.
+Os módulos abaixo representam o escopo do produto. A disponibilidade e o estágio de implementação de cada recurso devem ser confirmados no código e por meio de testes.
 
-3) Versão para pitch deck
+Perfis e descoberta
 
-JOBS é uma plataforma digital brasileira em desenvolvimento que reúne relacionamentos, descoberta de perfis, interação social, conteúdo e experiências ao vivo em um único ecossistema.
+Apresentação de perfis, preferências, busca e mecanismos para descobrir pessoas e comunidades, respeitando os controles de privacidade disponíveis.
 
-A ideia do projeto é criar um ambiente moderno e seguro para conectar pessoas, fortalecer comunidades e oferecer novas oportunidades para criadores, usuários e marcas. A plataforma combina perfis, conteúdo visual, interação em tempo real, monetização e ferramentas de gestão para produção e desempenho.
+Fotos e vídeos
 
-Com foco em experiência, segurança e escalabilidade, o JOBS foi pensado para evoluir de forma modular e sustentável, preservando a arquitetura atual e preparando a plataforma para expansão internacional.
+Recursos para publicação e organização de conteúdo multimídia nos perfis, conforme as funcionalidades implementadas.
 
-Nossa proposta:
-- conectar pessoas e criadores
-- centralizar conteúdo e experiência digital
-- facilitar monetização e engajamento
-- oferecer controle, transparência e segurança
+Cofre VIP
 
-O JOBS nasce no Brasil com visão global e está em construção para se tornar um ecossistema de conexões, conteúdo e oportunidades.
+Área destinada a conteúdos premium, com acesso condicionado às regras e aos recursos efetivamente disponíveis no projeto.
 
-4) Versão para documento de produto
+Desbloqueio individual de conteúdo
 
-Nome do produto: JOBS
+Possibilidade de oferecer acesso individual a conteúdos mediante apresentação clara do preço, confirmação do usuário e aplicação das regras de cobrança implementadas.
 
-Visão
-Criar uma plataforma digital que conecte pessoas, conteúdos e oportunidades em um único ecossistema, com foco em experiência, segurança, transparência e crescimento escalável.
+Lives e interação
+
+Experiências ao vivo, interação entre participantes, engajamento e recursos de gamificação, de acordo com o estágio de desenvolvimento de cada módulo.
+
+Carteira virtual
+
+Gestão de créditos virtuais, histórico de movimentações e apresentação clara dos valores. Créditos virtuais, receitas de criadores e saldos financeiros devem permanecer conceitualmente separados e sujeitos às regras de negócio aplicáveis.
+
+Creator Studio
+
+Área voltada à gestão de conteúdo, acompanhamento de desempenho e ferramentas para criadores.
+
+Painel administrativo
+
+Visão operacional da plataforma, com indicadores, monitoramento, auditoria e controles compatíveis com os módulos existentes.
+
+Descoberta por proximidade — planejamento futuro
+
+Avaliação de uma possível integração com o Google Maps para permitir buscas por região e estimativas de distância entre usuários, mediante consentimento e controles de privacidade. A integração depende de auditoria técnica e autorização específica para implementação.
+
+4. Transparência, segurança e privacidade
+
+A evolução do JOBS deve priorizar:
+
+- Proteção de dados pessoais e controle de acesso.
+- Consentimento e transparência na coleta e no uso de informações.
+- Clareza nos preços e confirmação antes de cobranças.
+- Rastreabilidade das movimentações financeiras.
+- Prevenção de transações duplicadas e inconsistências de saldo.
+- Separação entre simulação, testes e operações reais.
+- Proteção de credenciais e chaves de API.
+- Auditoria de ações administrativas e eventos relevantes.
+- Testes e evidências antes de declarar funcionalidades concluídas.
+- Preservação da arquitetura e dos dados existentes durante as alterações.
+
+Recursos financeiros e integrações externas devem ser validados antes de qualquer uso em produção. A existência de uma interface visual ou de uma simulação não comprova, por si só, a operação real do recurso.
+
+5. Arquitetura e desenvolvimento
+
+O projeto está em desenvolvimento com foco em modularidade, manutenção contínua, integração segura de serviços e evolução incremental.
+
+A estrutura e as tecnologias efetivamente utilizadas devem ser confirmadas pela inspeção do repositório. Entre os aspectos a verificar estão:
+
+- Aplicação frontend e estrutura de componentes.
+- Serviços e regras de negócio.
+- Autenticação, armazenamento e permissões.
+- Gestão de perfis e conteúdos.
+- Carteira, transações e auditoria.
+- Integrações externas e gerenciamento de configurações.
+- Compatibilidade com dispositivos móveis e eventual aplicação Android via Capacitor.
+- Estratégias de testes, validação e implantação.
+
+Princípio de desenvolvimento: preservar o projeto existente, evitar reescritas desnecessárias, realizar mudanças incrementais e comprovar os resultados com evidências.
+
+A documentação deve distinguir entre funcionalidades planejadas, em desenvolvimento, implementadas e efetivamente testadas.
+
+6. Auditoria técnica — integração futura com Google Maps
 
 Objetivo
-Oferecer uma experiência moderna e intuitiva para que usuários e criadores possam interagir, publicar conteúdo, explorar perfis, participar de eventos ao vivo e gerar valor por meio de monetização e engajamento.
 
-Principais módulos
-- Perfis e descoberta
-- Conteúdo multimídia
-- Cofre VIP
-- Desbloqueio de conteúdos
-- Lives e interações em tempo real
-- Carteira virtual
-- Creator Studio
-- Painel administrativo
+Avaliar a viabilidade de integrar o Google Maps ao módulo de descoberta do JOBS, permitindo buscas por proximidade e cálculo de distâncias aproximadas sem expor a localização exata de outros usuários.
 
-Requisitos de produto
-- Segurança de dados e controle de acesso
-- clareza na cobrança e confirmação antes de transações
-- rastreabilidade das movimentações
-- prevenção de erros e cobranças duplicadas
-- separação entre ambientes de simulação, testes e produção
-- arquitetura evolutiva e modular
+Escopo desta etapa
 
-Status
-Em desenvolvimento.
+Somente inspecionar e planejar. Não alterar arquivos, instalar dependências ou ativar serviços.
 
-Observação
-A disponibilidade de uma funcionalidade em versão pública não garante que ela esteja totalmente concluída. Cada módulo deve ser validado por testes, inspeção do código e verificações de segurança.
+A auditoria deverá identificar:
 
-5) Versão para arquitetura técnica
+1. A arquitetura atual, incluindo React, Vite e eventual integração com Capacitor para Android.
+2. O módulo existente de descoberta, busca e filtros de usuários.
+3. Como os perfis são armazenados, consultados e protegidos.
+4. Se já existem recursos de localização ou cálculo de distância.
+5. Como o projeto gerencia variáveis de ambiente, configurações e chaves de API.
+6. Se existe infraestrutura adequada para consultas regionais sem expor coordenadas privadas.
 
-O JOBS é um projeto em desenvolvimento com foco em arquitetura modular, evolução incremental e integração segura de serviços. A estrutura foi pensada para facilitar manutenção, expansão e adaptação a novos módulos sem comprometer a base existente.
+Requisitos propostos
 
-Principais princípios
-- modularidade
-- separação de responsabilidades
-- integração segura de APIs e serviços
-- isolamento entre ambiente de teste e produção
-- rastreabilidade de movimentações e processos financeiros
-- evolução contínua com compatibilidade
+- Integrar a descoberta geográfica ao módulo existente, sem recriar o aplicativo.
+- Permitir configurar um raio de busca.
+- Apresentar distâncias aproximadas, sem revelar endereços ou coordenadas exatas de terceiros.
+- Solicitar consentimento antes de obter ou armazenar a localização.
+- Permitir desativar a descoberta por proximidade.
+- Oferecer cidade ou região como alternativa.
+- Respeitar os filtros de descoberta e as regras de privacidade existentes.
+- Considerar a compatibilidade futura com Android.
+- Não habilitar localização em segundo plano.
 
-Estruturas esperadas
-- frontend para experiência de usuário
-- backend para regras de negócio e autenticação
-- serviços de conteúdo e mídias
-- módulos de carteira e pagamentos virtuais
-- gestão de usuários, perfis e permissões
-- painel administrativo e auditoria
-- suporte a eventos ao vivo e interações em tempo real
+APIs a avaliar
 
-Objetivo técnico
-Garantir uma base escalável, segura e fácil de manter, com suporte a novos recursos e expansão do ecossistema sem ruptura de arquitetura.
+A auditoria deverá determinar quais serviços são realmente necessários, considerando:
 
-A implementação real deve refletir a estrutura atual do repositório e confirmar quais módulos e integrações já foram efetivamente desenvolvidos.
+- Maps JavaScript API: possível exibição de mapas na interface web.
+- Places API (New): possível busca de lugares, se necessária ao produto.
+- Routes API: possível cálculo de rotas ou distâncias por trajeto, caso esse requisito seja confirmado.
+- Geolocalização do navegador ou do dispositivo: obtenção da posição do próprio usuário mediante permissão, quando aplicável.
 
-6) Versão em inglês para investidores ou clientes internacionais
+O uso de Geocoding API ou de outros serviços deverá ser justificado pela necessidade técnica identificada. Não se deve habilitar APIs apenas por precaução.
 
-JOBS is a digital platform under development that connects people, content, and opportunities in a single ecosystem. It brings together profile discovery, social interaction, media sharing, live experiences, creator tools, and digital monetization in a modern and secure environment.
+Segurança da integração
 
-The platform is designed to offer a smooth and intuitive experience for users and creators, enabling engagement, content publishing, community building, and participation in live events. It also supports premium content access, virtual wallet management, and business operations through an administrative dashboard.
+- Não inserir chaves de API diretamente no código-fonte.
+- Avaliar restrições por aplicação, domínio e API.
+- Configurar limites de uso, alertas de custos e monitoramento.
+- Evitar armazenar coordenadas precisas sem necessidade justificada.
+- Definir regras de retenção, acesso e exclusão dos dados de localização.
+- Não alterar autenticação, dados financeiros, "ledgerService" ou regras de distribuição 70/30.
+- Não realizar mudanças sem autorização explícita.
 
-Our approach prioritizes:
-- data protection and access control
-- transparency in pricing and user confirmation before charges
-- traceability of financial movements
-- prevention of duplicate charges
-- clear separation between sandbox, testing, and production environments
-- incremental evolution without compromising the existing architecture
-- validation through tests and evidence before feature completion
+Entregáveis da auditoria
 
-JOBS was born in Brazil with a global vision. It is being built as a scalable digital ecosystem focused on connections, content, and opportunities.
+O relatório deverá apresentar os arquivos relevantes, a arquitetura identificada, os recursos já existentes, as lacunas, os riscos de privacidade e segurança, as APIs necessárias e o menor plano incremental de implementação.
 
+A auditoria não deverá declarar a integração implementada ou testada. Qualquer alteração dependerá de autorização posterior.
 
+7. Princípios técnicos e operacionais
+
+O desenvolvimento do JOBS deverá seguir estes princípios:
+
+- Modularidade e separação de responsabilidades.
+- Preservação da base de código existente.
+- Integração segura de APIs e serviços.
+- Controle de acesso e proteção de dados.
+- Isolamento entre ambientes de teste e produção.
+- Rastreabilidade dos processos e das movimentações financeiras.
+- Prevenção de duplicidade e inconsistências.
+- Compatibilidade e manutenção contínua.
+- Validação por inspeção do código, testes e evidências.
+- Ausência de declarações de sucesso sem comprovação.
+
+As decisões de arquitetura deverão refletir a estrutura real do repositório, sem apresentar estruturas planejadas como se já estivessem implementadas.
+
+8. Status do projeto
+
+Status geral: Em desenvolvimento.
+
+O JOBS está em evolução. Cada módulo deverá ter seu estágio documentado com base em evidências verificáveis.
+
+A publicação de uma versão não significa que todas as funcionalidades estejam concluídas, seguras ou prontas para produção. Compilação, testes automatizados, validação de segurança e funcionamento integrado devem ser verificados separadamente.
+
+9. Proposta de valor
+
+O JOBS busca reunir em um único ecossistema:
+
+- Conexões entre pessoas e criadores.
+- Descoberta de perfis e comunidades.
+- Compartilhamento e acesso a conteúdo.
+- Experiências ao vivo e engajamento.
+- Ferramentas para criação e gestão de conteúdo.
+- Recursos de monetização com transparência.
+- Controles operacionais e mecanismos de auditoria.
+
+A proposta é construir uma experiência integrada que evolua de maneira responsável, com atenção à segurança, à confiança dos usuários e à sustentabilidade do produto.
+
+10. Apresentação para investidores e parceiros
+
+O JOBS é uma plataforma digital brasileira em desenvolvimento que reúne descoberta de perfis, interação social, conteúdo multimídia, experiências ao vivo e ferramentas para criadores em um único ecossistema.
+
+A proposta é criar um ambiente moderno e seguro para conectar pessoas, fortalecer comunidades e desenvolver novas oportunidades para usuários, criadores e parceiros.
+
+Com foco em experiência, privacidade, transparência e arquitetura evolutiva, o JOBS está sendo desenvolvido para crescer de forma modular, preservando sua base técnica e preparando-se para futuras oportunidades de expansão internacional.
+
+Nossa proposta:
+
+- Conectar pessoas e criadores.
+- Integrar conteúdo e experiências digitais.
+- Ampliar possibilidades de engajamento e monetização.
+- Promover transparência, segurança e controle.
+- Evoluir com responsabilidade e potencial de escala.
+
+O JOBS nasce no Brasil com visão global e busca se consolidar como um ecossistema de conexões, conteúdo e oportunidades.
+
+11. International overview
+
+JOBS is a Brazilian digital platform under development that aims to connect people, content, and opportunities in a single ecosystem.
+
+The platform brings together profile discovery, social interaction, media sharing, live experiences, creator tools, and digital monetization concepts in a modern and secure environment.
+
+Our development priorities include:
+
+- Data protection and access control.
+- Transparent pricing and user confirmation before charges.
+- Traceability of financial transactions.
+- Prevention of duplicate transactions.
+- Separation between sandbox, testing, and production environments.
+- Incremental development that preserves the existing architecture.
+- Validation through code inspection, tests, and verifiable evidence.
+
+JOBS was born in Brazil with a global vision. Its long-term ambition is to become a scalable digital ecosystem focused on connections, content, and opportunities, while adapting responsibly to the requirements of each market.
+
+---
+
+JOBS — Conexões, conteúdo e oportunidades em um só lugar.
+
+Nascemos no Brasil. Nossa visão é global.
