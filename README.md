@@ -223,10 +223,4 @@ Our approach prioritizes:
 
 JOBS was born in Brazil with a global vision. It is being built as a scalable digital ecosystem focused on connections, content, and opportunities.
 
-Se quiser, posso transformar qualquer uma dessas versões em:
-- uma versão com estilo mais premium para apresentação
-- uma versão com “badges” e estrutura de README
-- uma versão para landing page
-- um resumo executivo para investidores
-- um texto em inglês mais sofisticado para pitch internacional
 
