@@ -34,6 +34,8 @@ import {
 import { monetizationService } from '../../services/monetizationService';
 import { financialLedger, LedgerEntry } from '../../services/ledgerService';
 import { CreatorRankingItem, CreatorRankingSortMode } from '../../types';
+import { AnalyticalIndicatorPopover } from './AnalyticalIndicatorPopover';
+import { CreatorComparativeBarCell } from './CreatorComparativeBarCell';
 
 interface CreatorEarningsRankingViewProps {
   onOpenCreatorDossier?: (creator: CreatorRankingItem) => void;
@@ -508,14 +510,94 @@ export const CreatorEarningsRankingView: React.FC<CreatorEarningsRankingViewProp
                   <th className="py-3 px-3 w-14">2. Foto</th>
                   <th className="py-3 px-3">3. Nome Público / Usuário</th>
                   <th className="py-3 px-3">4. ID Interno</th>
-                  <th className="py-3 px-3 text-right">5. Ganhos Brutos</th>
-                  <th className="py-3 px-3 text-right text-rose-400">6. JOBS (30%)</th>
-                  <th className="py-3 px-3 text-right text-slate-400">7. Taxas PSP</th>
-                  <th className="py-3 px-3 text-right text-amber-400">8. Estornos</th>
-                  <th className="py-3 px-3 text-right text-emerald-400 font-bold">9. Ganhos Líquidos</th>
-                  <th className="py-3 px-3 text-right text-purple-400">10. Pendentes (D+14)</th>
-                  <th className="py-3 px-3 text-right text-cyan-400">11. Elegível Saque</th>
-                  <th className="py-3 px-3 text-right text-slate-300">12. Já Pagos</th>
+                  <th className="py-3 px-3 text-right">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>5. Ganhos Brutos</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="gross_sales"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right text-rose-400">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>6. JOBS (30%)</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="platform_commission"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right text-slate-400">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>7. Taxas PSP</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="psp_fees"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right text-amber-400">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>8. Estornos</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="refunds_adjustments"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right text-emerald-400 font-bold">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>9. Ganhos Líquidos</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="net_accumulated"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right text-purple-400">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>10. Pendentes (D+14)</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="pending_payment"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right text-cyan-400">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>11. Elegível Saque</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="eligible_withdrawal"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right text-slate-300">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <span>12. Já Pagos</span>
+                      <AnalyticalIndicatorPopover
+                        indicatorKey="total_paid"
+                        environment={environment}
+                        period={normalizedPeriod}
+                        align="right"
+                      />
+                    </div>
+                  </th>
                   <th className="py-3 px-3">13. Última Mov.</th>
                   <th className="py-3 px-3 text-center">14. Status / Ação</th>
                 </tr>
@@ -638,9 +720,14 @@ export const CreatorEarningsRankingView: React.FC<CreatorEarningsRankingViewProp
                           : 'R$ 0,00'}
                       </td>
 
-                      {/* 9. Ganhos Líquidos Acumulados (70%) */}
-                      <td className="py-3 px-3 text-right font-mono font-bold text-emerald-300">
-                        R$ {creator.netAccumulatedEarningsBrl.toFixed(2).replace('.', ',')}
+                      {/* 9. Ganhos Líquidos Acumulados (70%) com Decomposição Contábil e Barras Comparativas */}
+                      <td className="py-3 px-3 text-right">
+                        <CreatorComparativeBarCell
+                          creator={creator}
+                          environment={environment}
+                          period={normalizedPeriod}
+                          isAnonymized={isAnonymized}
+                        />
                       </td>
 
                       {/* 10. Valores Pendentes de Liberação (D+14) */}

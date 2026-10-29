@@ -538,10 +538,81 @@ async function runPspReconciliationAndUnificationTests(): Promise<void> {
     checklist.length === 4 && totalChecklistItems === 28,
     `Teste 11b: Checklist Executivo deve conter 4 seções e 28 itens (atual: ${checklist.length} seções, ${totalChecklistItems} itens)`
   );
-  console.log('✓ Teste 11 passou: Recuperação de sequência e Checklist Executivo (4 seções / 28 itens) validados.');
+  // ---------------------------------------------------------------------------
+  // TESTE 12: As 6 Verificações Obrigatórias do Bloqueio Fail-Closed (PSP_NOT_CONFIGURED_FOR_PRODUCTION)
+  // ---------------------------------------------------------------------------
+  console.log('\n--- EXECUTANDO TESTE 12: 6 VERIFICAÇÕES OBRIGATÓRIAS FAIL-CLOSED ---');
+
+  // 12.1 Ponto de bloqueio no código e recusa com código contratual
+  const failClosedDispatchRes = await pspWebhookReconciliationService.dispatchPixPayoutOrder({
+    payoutId: reqRes.payout.id,
+    environment: 'production',
+    actorId: 'test_sec_auditor',
+  });
+  assert(
+    failClosedDispatchRes.dispatched === false &&
+      failClosedDispatchRes.errorCode === 'PSP_NOT_CONFIGURED_FOR_PRODUCTION',
+    'Teste 12.1: dispatchPixPayoutOrder deve recusar com errorCode PSP_NOT_CONFIGURED_FOR_PRODUCTION em produção'
+  );
+
+  // 12.2 Recusa com configuração ausente ou inválida
+  const invalidConfigCheck = pspWebhookReconciliationService.validateProductionPspConfig({
+    contractEnabled: false,
+    mtlsConfigured: false,
+  });
+  assert(
+    invalidConfigCheck.valid === false && invalidConfigCheck.missingRequirements.length >= 4,
+    'Teste 12.2: validateProductionPspConfig deve reprovar configurações incompletas ou ausentes'
+  );
+
+  // 12.3 Zero chamadas externas de pagamento realizadas no cenário de recusa
+  assert(
+    failClosedDispatchRes.externalCallsAttempted === 0,
+    'Teste 12.3: Nenhuma chamada externa de rede pode ser executada sob recusa fail-closed'
+  );
+
+  // 12.4 Proteção de credenciais e segredos contra vazamento em logs ou frontend
+  const rawLeakPayload = {
+    apiKey: 'my_sensitive_key_9999',
+    hmacSecret: 'super_secret_hmac_prod_secret_2026',
+    mtlsPrivateKey: 'PRIVATE_KEY_DATA_CERT',
+    clientSecret: 'secret_oauth_jobs_client_99',
+    publicParam: 'public_id_jobs',
+  };
+  const sanitized = pspWebhookReconciliationService.sanitizePspConfigAndSecrets(rawLeakPayload);
+  assert(
+    !JSON.stringify(sanitized).includes('super_secret_hmac_prod_secret_2026') &&
+      !JSON.stringify(sanitized).includes('PRIVATE_KEY_DATA_CERT') &&
+      sanitized.publicParam === 'public_id_jobs',
+    'Teste 12.4: sanitizePspConfigAndSecrets deve mascarar todos os segredos sensíveis'
+  );
+
+  // 12.5 Falha de configuração não gera confirmação financeira nem saldo fictício em Produção
+  const postFailPayouts = financialLedger.getPayoutRecords('production');
+  const targetAfterFail = postFailPayouts.find((p) => p.id === reqRes.payout.id);
+  assert(
+    targetAfterFail?.status !== 'released',
+    'Teste 12.5a: Payout recusado nunca pode ser marcado como released'
+  );
+  assert(
+    failClosedDispatchRes.fallbackOccurred === false,
+    'Teste 12.5b: Não pode haver fallback silencioso para simulação ou armazenamento local'
+  );
+
+  // 12.6 Registro estruturado de evidências de homologação e diagnóstico completo
+  const homologationDiagnostic = pspWebhookReconciliationService.getFailClosedHomologationDiagnostic();
+  assert(
+    homologationDiagnostic.isFailClosedActive === true &&
+      homologationDiagnostic.prerequisites.length === 6 &&
+      homologationDiagnostic.verifications.length === 6 &&
+      homologationDiagnostic.classification === 'NÃO VALIDADO PARA LIQUIDAÇÃO FINANCEIRA REAL EM PRODUÇÃO',
+    'Teste 12.6: Diagnóstico de homologação deve conter os 6 pré-requisitos e as 6 verificações com classificação correta'
+  );
+
+  console.log('✓ Teste 12 passou: Todas as 6 verificações obrigatórias de bloqueio fail-closed comprovadas!');
 
   console.log('======================================================================');
-  console.log('TODOS OS 11 CENÁRIOS DE CONCILIAÇÃO, UNIFICAÇÃO E CONTINGÊNCIA APROVADOS!');
+  console.log('TODOS OS 12 CENÁRIOS DE CONCILIAÇÃO, UNIFICAÇÃO E HOMOLOGAÇÃO APROVADOS!');
   console.log('======================================================================');
 }
 

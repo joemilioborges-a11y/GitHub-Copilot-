@@ -1,0 +1,5 @@
+{
+  "summary":  "Relatório de Engenharia e Auditoria do Refinamento do Ranking Financeiro de Criadores no CentralAdminDashboardModal da plataforma JOBS. Documenta a implementação dos popovers analíticos acessíveis com 8 dimensões contábeis, as barras proporcionais de decomposição contábil (70% Criador, 30% JOBS, Estornos e comparação periódica) integradas na célula de ganhos de cada criador, a conformidade de acessibilidade WCAG/ARIA, a rastreabilidade estrita com o livro-razão imutável (financialLedger) e os resultados da bateria de testes automatizados com 100% de aprovação (360/360 testes).",
+  "updatedAt":  "2026-10-29T09:12:32.672132848Z",
+  "userFacing":  true
+}

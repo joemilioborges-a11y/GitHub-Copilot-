@@ -61,6 +61,7 @@ import { RevenueAndEarningsReportPanel } from './admin/RevenueAndEarningsReportP
 import { AdminRevenueSimulatorPanel } from './admin/AdminRevenueSimulatorPanel';
 import { LedgerSha256AuditViewer } from './admin/LedgerSha256AuditViewer';
 import { TalentProgressAdminAuditPanel } from './admin/TalentProgressAdminAuditPanel';
+import { OfficialFinancialEvolutionChart } from './admin/OfficialFinancialEvolutionChart';
 import { adminAuditService } from '../services/adminAuditService';
 import {
   runtimeEnvironmentService,
@@ -1193,61 +1194,16 @@ export const CentralAdminDashboardModal: React.FC<CentralAdminDashboardModalProp
                   </div>
                 </div>
 
-                {/* Gráfico Visual por Período: Volume de Compras e Consumo de Créditos */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-[#0e0e18] border border-slate-800 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-rose-400" />
-                        <span>Volume e Movimentação por Período ({periodFilter === 'today' ? 'Hoje' : periodFilter === '7days' ? 'Últimos 7 Dias' : periodFilter === '30days' ? 'Últimos 30 Dias' : 'Personalizado'})</span>
-                      </h4>
-                      <p className="text-[11px] text-slate-400">Distribuição temporal de compras simuladas (R$) e créditos consumidos (💎)</p>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-[11px]">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 rounded bg-emerald-500" />
-                        <span className="text-slate-300">Compras (R$)</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 rounded bg-rose-500" />
-                        <span className="text-slate-300">Consumo (💎)</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Visual Bar Grid */}
-                  <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 pt-2 items-end h-32 border-b border-slate-800/80 pb-2">
-                    {[
-                      { label: 'Dia 1', compras: 75, consumo: 60, brl: 'R$ 87,70', cr: '180 💎' },
-                      { label: 'Dia 2', compras: 45, consumo: 80, brl: 'R$ 55,80', cr: '240 💎' },
-                      { label: 'Dia 3', compras: 90, consumo: 70, brl: 'R$ 119,80', cr: '210 💎' },
-                      { label: 'Dia 4', compras: 60, consumo: 50, brl: 'R$ 67,60', cr: '150 💎' },
-                      { label: 'Dia 5', compras: 100, consumo: 95, brl: 'R$ 147,60', cr: '290 💎' },
-                      { label: 'Dia 6', compras: 85, consumo: 65, brl: 'R$ 99,80', cr: '195 💎' },
-                      { label: 'Hoje', compras: 70, consumo: 85, brl: 'R$ 79,80', cr: '255 💎' },
-                    ].map((col, idx) => (
-                      <div key={idx} className="flex flex-col items-center gap-1 h-full justify-end group cursor-pointer">
-                        <div className="w-full flex items-end justify-center gap-1 h-24">
-                          <div
-                            className="w-3 sm:w-4 bg-emerald-500/80 group-hover:bg-emerald-400 rounded-t transition-all"
-                            style={{ height: `${col.compras}%` }}
-                            title={`Compras: ${col.brl}`}
-                          />
-                          <div
-                            className="w-3 sm:w-4 bg-rose-500/80 group-hover:bg-rose-400 rounded-t transition-all"
-                            style={{ height: `${col.consumo}%` }}
-                            title={`Consumo: ${col.cr}`}
-                          />
-                        </div>
-                        <span className="text-[10px] text-slate-400 group-hover:text-white transition-colors">{col.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="text-[10px] text-slate-500 text-center">
-                    Indicadores filtrados para ambiente de testes · Dados recalculados em tempo real a cada transação
-                  </div>
-                </div>
+                {/* Gráfico Oficial Auditado: Receita Líquida e Saldo Disponível (Regras 1 a 10) */}
+                <OfficialFinancialEvolutionChart
+                  environment={envMode === 'simulation' ? 'sandbox' : 'production'}
+                  period={periodFilter === '30days' ? '30days' : '7days'}
+                  onPeriodChange={(p) => setPeriodFilter(p === '30days' ? '30days' : '7days')}
+                  onOpenLedger={() => {
+                    setActiveSection('wallet');
+                    setWalletSubTab('ledger');
+                  }}
+                />
 
                 {/* Painel de Alertas de Inconsistência Contábil & Segurança */}
                 <div className="p-4 sm:p-5 rounded-2xl bg-[#0c1218] border border-cyan-500/30 space-y-3">

@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { getSafeMeetupRecommendationsClient } from '../services/geminiClient';
 import { Profile } from '../types';
 import {
   DiscoveryAndLiveFilterCriteria,
@@ -784,7 +784,7 @@ const CURATED_SAFE_MEETUP_PLACES: Record<string, SafeMeetupPlaceCitation[]> = {
 
 /**
  * Consulta sugestões de locais públicos seguros para encontros na zona aproximada
- * utilizando Gemini Maps Grounding (`gemini-2.5-flash` com `googleMaps` tool).
+ * utilizando rota segura no servidor com Gemini Maps Grounding.
  * Envia apenas o centroide público da zona aproximada (nunca coordenadas privadas).
  */
 export async function fetchZoneSafeMeetupRecommendations(
@@ -796,75 +796,34 @@ export async function fetchZoneSafeMeetupRecommendations(
 
   const curatedFallback = CURATED_SAFE_MEETUP_PLACES[zone.zoneId] || [];
 
-  const apiKey =
-    (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) || '';
-
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    return {
-      zoneId: zone.zoneId,
-      zoneLabel: zone.displayLabel,
-      summaryText: `Locais públicos verificados em ${zone.displayLabel} recomendados para um primeiro encontro seguro: ${zone.safetyNote}`,
-      citations: curatedFallback,
-      source: 'curated_public_landmarks',
-      queriedCentroid: zone.centroid,
-    };
-  }
-
   try {
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+    const serverResult = await getSafeMeetupRecommendationsClient({
+      zoneId: zone.zoneId,
+      neighborhoodName: zone.neighborhoodName,
+      cityName: zone.cityName,
+      centroid: zone.centroid,
     });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Recomende 3 lugares públicos seguros, bem iluminados e conceituados (restaurantes, cafés ou centros culturais) na região de ${zone.neighborhoodName}, em ${zone.cityName}, ideais para um primeiro encontro seguro entre adultos. Seja conciso em português.`,
-      config: {
-        tools: [{ googleMaps: {} }],
-        toolConfig: {
-          retrievalConfig: {
-            latLng: {
-              latitude: zone.centroid.lat,
-              longitude: zone.centroid.lng,
-            },
-          },
-        },
-      },
-    });
-
-    const chunks =
-      response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const groundedCitations: SafeMeetupPlaceCitation[] = [];
-
-    for (const chunk of chunks) {
-      const mapsChunk = (chunk as any)?.maps;
-      if (mapsChunk?.uri && mapsChunk?.title) {
-        groundedCitations.push({
-          title: String(mapsChunk.title),
-          uri: String(mapsChunk.uri),
-          category: 'Google Maps Verificado',
-        });
-      }
+    if (serverResult && serverResult.citations && serverResult.citations.length > 0) {
+      return {
+        zoneId: zone.zoneId,
+        zoneLabel: zone.displayLabel,
+        summaryText: serverResult.summaryText,
+        citations: serverResult.citations,
+        source: serverResult.source,
+        queriedCentroid: zone.centroid,
+      };
     }
-
-    return {
-      zoneId: zone.zoneId,
-      zoneLabel: zone.displayLabel,
-      summaryText:
-        response.text ||
-        `Sugestões públicas verificadas em ${zone.displayLabel}: ${zone.safetyNote}`,
-      citations: groundedCitations.length > 0 ? groundedCitations : curatedFallback,
-      source: 'gemini_maps_grounding',
-      queriedCentroid: zone.centroid,
-    };
-  } catch {
-    return {
-      zoneId: zone.zoneId,
-      zoneLabel: zone.displayLabel,
-      summaryText: `Locais públicos verificados em ${zone.displayLabel} recomendados para um primeiro encontro seguro: ${zone.safetyNote}`,
-      citations: curatedFallback,
-      source: 'curated_public_landmarks',
-      queriedCentroid: zone.centroid,
-    };
+  } catch (err) {
+    console.warn('[Proximity] Erro ao buscar recomendações seguras no servidor:', err);
   }
+
+  return {
+    zoneId: zone.zoneId,
+    zoneLabel: zone.displayLabel,
+    summaryText: `Locais públicos verificados em ${zone.displayLabel} recomendados para um primeiro encontro seguro: ${zone.safetyNote}`,
+    citations: curatedFallback,
+    source: 'curated_public_landmarks',
+    queriedCentroid: zone.centroid,
+  };
 }

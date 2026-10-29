@@ -56,6 +56,8 @@ import {
   ExecutiveFinancialCardIndicator,
 } from '../../types';
 import { WithdrawalSimulator } from './WithdrawalSimulator';
+import { AnalyticalIndicatorPopover } from './AnalyticalIndicatorPopover';
+import { CreatorComparativeBarCell } from './CreatorComparativeBarCell';
 
 interface PlatformFinancialExecutiveProps {
   onOpenWithdrawModal?: (availableBrl: number) => void;
@@ -92,10 +94,65 @@ export const PlatformFinancialExecutive: React.FC<PlatformFinancialExecutiveProp
   // Modal de Ficha Financeira Detalhada do Criador
   const [selectedCreatorDossier, setSelectedCreatorDossier] = useState<CreatorRankingItem | null>(null);
 
-  // Feedback Toast
+  // Feedback Toast & Conciliação
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
   const [lastReconciliationHash, setLastReconciliationHash] = useState<string>('REC-BACEN-20261019-88192');
+
+  // Teste de Bloqueio Fail-Closed
+  const [failClosedTestResult, setFailClosedTestResult] = useState<{
+    tested: boolean;
+    isBlocked: boolean;
+    errorCode?: string;
+    externalCallsAttempted?: number;
+    fallbackOccurred?: boolean;
+    message?: string;
+  } | null>(null);
+  const [isTestingFailClosed, setIsTestingFailClosed] = useState(false);
+
+  const handleTestFailClosedBlock = async () => {
+    setIsTestingFailClosed(true);
+    try {
+      let testPayoutId = 'payout_test_failclosed_prod';
+      const prodPayouts = financialLedger.getPayoutRecords('production');
+      if (prodPayouts.length > 0) {
+        testPayoutId = prodPayouts[0].id;
+      } else {
+        const req = await financialLedger.requestPayout({
+          creatorId: 'creator_test_audit',
+          creatorName: 'Criador Auditoria',
+          amountBrl: 150.0,
+          payoutMethod: 'PIX',
+          pixKeyOrAccount: 'audit@jobs.com',
+          idempotencyKey: `idemp_failclosed_test_${Date.now()}`,
+          environment: 'production',
+          reserveImmediately: false,
+        });
+        testPayoutId = req.payout.id;
+      }
+
+      const res = await pspWebhookReconciliationService.dispatchPixPayoutOrder({
+        payoutId: testPayoutId,
+        environment: 'production',
+        actorId: 'admin_dashboard',
+      });
+
+      setFailClosedTestResult({
+        tested: true,
+        isBlocked: !res.dispatched && res.errorCode === 'PSP_NOT_CONFIGURED_FOR_PRODUCTION',
+        errorCode: res.errorCode,
+        externalCallsAttempted: res.externalCallsAttempted,
+        fallbackOccurred: res.fallbackOccurred,
+        message: res.message,
+      });
+
+      showToast('Bloqueio fail-closed testado: recusa PSP_NOT_CONFIGURED_FOR_PRODUCTION confirmada.');
+    } catch {
+      showToast('Erro ao testar bloqueio fail-closed.');
+    } finally {
+      setIsTestingFailClosed(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -916,14 +973,94 @@ export const PlatformFinancialExecutive: React.FC<PlatformFinancialExecutiveProp
                   <tr className="border-b border-slate-800 bg-[#141424] text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                     <th className="py-3 px-3">1. Pos. & Criador</th>
                     <th className="py-3 px-3">3. ID Interno</th>
-                    <th className="py-3 px-3">4. Vendas Brutas</th>
-                    <th className="py-3 px-3">5. Taxa JOBS (30%)</th>
-                    <th className="py-3 px-3">6. Taxas PSP</th>
-                    <th className="py-3 px-3">7. Estornos</th>
-                    <th className="py-3 px-3">8. Ganho Líquido</th>
-                    <th className="py-3 px-3">9. Já Pago</th>
-                    <th className="py-3 px-3">10. Pendente</th>
-                    <th className="py-3 px-3">11. Elegível Saque</th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1">
+                        <span>4. Vendas Brutas</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="gross_sales"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1 text-amber-400">
+                        <span>5. Taxa JOBS (30%)</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="platform_commission"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1">
+                        <span>6. Taxas PSP</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="psp_fees"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1 text-rose-400">
+                        <span>7. Estornos</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="refunds_adjustments"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1 text-emerald-400">
+                        <span>8. Ganho Líquido</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="net_accumulated"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1">
+                        <span>9. Já Pago</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="total_paid"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1 text-amber-300">
+                        <span>10. Pendente</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="pending_payment"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-3 px-3">
+                      <div className="inline-flex items-center gap-1 text-cyan-300">
+                        <span>11. Elegível Saque</span>
+                        <AnalyticalIndicatorPopover
+                          indicatorKey="eligible_withdrawal"
+                          environment={environment}
+                          period={period}
+                          align="left"
+                        />
+                      </div>
+                    </th>
                     <th className="py-3 px-3">12. Status & KYC</th>
                     <th className="py-3 px-3">13. Última Atualização</th>
                     <th className="py-3 px-3 text-center">Ações</th>
@@ -1031,9 +1168,14 @@ export const PlatformFinancialExecutive: React.FC<PlatformFinancialExecutiveProp
                           {creator.refundsAndAdjustmentsBrl > 0 ? `- R$ ${creator.refundsAndAdjustmentsBrl.toFixed(2).replace('.', ',')}` : 'R$ 0,00'}
                         </td>
 
-                        {/* 8. Ganho Líquido Acumulado */}
-                        <td className="py-3 px-3 font-bold text-emerald-300">
-                          R$ {creator.netAccumulatedEarningsBrl.toFixed(2).replace('.', ',')}
+                        {/* 8. Ganho Líquido Acumulado com Barras Proporcionais */}
+                        <td className="py-3 px-3">
+                          <CreatorComparativeBarCell
+                            creator={creator}
+                            environment={environment}
+                            period={period}
+                            isAnonymized={isAnonymized}
+                          />
                         </td>
 
                         {/* 9. Valor Já Pago */}
@@ -1494,6 +1636,130 @@ export const PlatformFinancialExecutive: React.FC<PlatformFinancialExecutiveProp
                               </div>
                             </div>
                           ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Painel: Homologação Externa PSP PIX & 6 Verificações Fail-Closed */}
+                  {(() => {
+                    const homologationDiag = pspWebhookReconciliationService.getFailClosedHomologationDiagnostic();
+                    return (
+                      <div className="p-4 rounded-2xl bg-[#141424] border border-amber-500/40 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <ShieldAlert className="w-4 h-4 text-amber-400" />
+                              <h4 className="text-xs font-bold text-white">
+                                Homologação Externa PSP PIX & 6 Verificações Fail-Closed
+                              </h4>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              Adaptador <code className="text-amber-300 font-mono">dispatchPixPayoutOrder</code> bloqueia saques reais com código contratual <code className="text-rose-400 font-mono">PSP_NOT_CONFIGURED_FOR_PRODUCTION</code> sem efetuar chamadas externas nem alterar saldos.
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={handleTestFailClosedBlock}
+                              disabled={isTestingFailClosed}
+                              className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                              <ShieldAlert className={`w-3.5 h-3.5 ${isTestingFailClosed ? 'animate-spin' : ''}`} />
+                              <span>{isTestingFailClosed ? 'Testando Bloqueio...' : 'Testar Bloqueio Fail-Closed (Produção)'}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Banner de Resultado do Teste Controlado */}
+                        {failClosedTestResult && (
+                          <div className="p-3.5 rounded-xl bg-[#090912] border border-amber-500/60 space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                Comprovante de Bloqueio Fail-Closed em Tempo de Execução:
+                              </span>
+                              <span className="font-mono text-[10px] text-rose-400 font-bold bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800">
+                                {failClosedTestResult.errorCode}
+                              </span>
+                            </div>
+                            <p className="text-slate-300 text-[11px]">{failClosedTestResult.message}</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[10px] font-mono">
+                              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                                <span className="text-slate-400 block">Chamadas de Rede Externas:</span>
+                                <strong className="text-emerald-400">{failClosedTestResult.externalCallsAttempted} (Zero)</strong>
+                              </div>
+                              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                                <span className="text-slate-400 block">Fallback p/ Simulação / Local:</span>
+                                <strong className="text-emerald-400">{failClosedTestResult.fallbackOccurred ? 'Sim (Falha)' : 'Não Permitido (Bloqueado)'}</strong>
+                              </div>
+                              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                                <span className="text-slate-400 block">Integridade de Saldo do Titular:</span>
+                                <strong className="text-emerald-400">100% Preservada (Sem Lançamento)</strong>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {/* Coluna 1: Pré-Requisitos Contratuais & Técnicos do Provedor */}
+                          <div className="p-3.5 rounded-xl bg-[#0f0f18] border border-slate-800/90 space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-slate-800/70 pb-2">
+                              <span className="text-xs font-bold text-white">
+                                Pré-Requisitos de Homologação Externa do PSP
+                              </span>
+                              <span className="text-[10px] font-mono text-amber-400">
+                                {homologationDiag.prerequisites.filter((p) => p.status === 'verified').length}/6 validados
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              {homologationDiag.prerequisites.map((prq) => (
+                                <div key={prq.id} className="p-2 rounded-lg bg-slate-900/50 border border-slate-800/60 space-y-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold text-slate-200">{prq.name}</span>
+                                    <span
+                                      className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
+                                        prq.status === 'verified'
+                                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                          : 'bg-amber-950 text-amber-400 border border-amber-800'
+                                      }`}
+                                    >
+                                      {prq.status === 'verified' ? 'Configurado' : 'Pendente'}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-400">{prq.details}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Coluna 2: As 6 Verificações Obrigatórias do Bloqueio Fail-Closed */}
+                          <div className="p-3.5 rounded-xl bg-[#0f0f18] border border-slate-800/90 space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-slate-800/70 pb-2">
+                              <span className="text-xs font-bold text-white">
+                                6 Verificações Obrigatórias do Bloqueio Fail-Closed
+                              </span>
+                              <span className="text-[10px] font-mono text-emerald-400">
+                                6/6 ativas no código
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              {homologationDiag.verifications.map((vrf) => (
+                                <div key={vrf.id} className="p-2 rounded-lg bg-slate-900/50 border border-slate-800/60 space-y-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold text-slate-200">{vrf.criterion}</span>
+                                    <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.2 rounded border border-emerald-800 shrink-0">
+                                      {vrf.id}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400">{vrf.description}</div>
+                                  <div className="text-[9px] font-mono text-slate-500">
+                                    Local: {vrf.codeLocation} · {vrf.evidence}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );

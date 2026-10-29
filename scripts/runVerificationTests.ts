@@ -496,6 +496,41 @@ async function main() {
     }
   }
 
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES DE INTEGRIDADE DO HISTÓRICO FINANCEIRO (REGRAS 1 A 10)');
+  console.log('========================================================================\n');
+
+  const { runFinancialHistoryIntegrityTests } = await import(
+    '../src/services/__tests__/financialHistoryIntegrity.test'
+  );
+  const finHistSummary = await runFinancialHistoryIntegrityTests();
+
+  for (const t of finHistSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} Regra ${t.id} [${t.category}]: ${t.title}`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.divergence) {
+      console.log(`    DIVERGÊNCIA: ${t.divergence}`);
+    }
+  }
+
+  console.log('\n========================================================================');
+  console.log('JOBS — TESTES DE REFINAMENTO DO RANKING FINANCEIRO DE CRIADORES');
+  console.log('========================================================================\n');
+
+  const { runCreatorRankingRefinementTests } = await import(
+    '../src/utils/creatorFinancialRankingRefinementTests'
+  );
+  const rankingRefinementSummary = runCreatorRankingRefinementTests();
+
+  for (const t of rankingRefinementSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} ${t.id} [${t.category}]: ${t.name} (${t.durationMs}ms)`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO: ${t.error}`);
+    }
+  }
+
   const grandTotal =
     summary.totalTests +
     withdrawalSummary.total +
@@ -523,7 +558,9 @@ async function main() {
     creatorContentSummary.total +
     prodReadinessSummary.total +
     progMediaSecSummary.total +
-    talentSimSummary.total;
+    talentSimSummary.total +
+    finHistSummary.totalTests +
+    rankingRefinementSummary.totalTests;
   const grandPassed =
     summary.passedCount +
     withdrawalSummary.passed +
@@ -551,7 +588,9 @@ async function main() {
     creatorContentSummary.passed +
     prodReadinessSummary.passed +
     progMediaSecSummary.passed +
-    talentSimSummary.passed;
+    talentSimSummary.passed +
+    finHistSummary.passedTests +
+    rankingRefinementSummary.passedTests;
   const grandFailed =
     summary.failedCount +
     withdrawalSummary.failed +
@@ -579,7 +618,9 @@ async function main() {
     creatorContentSummary.failed +
     prodReadinessSummary.failed +
     progMediaSecSummary.failed +
-    talentSimSummary.failed;
+    talentSimSummary.failed +
+    finHistSummary.failedTests +
+    rankingRefinementSummary.failedTests;
 
   console.log('\n========================================================================');
   console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
@@ -603,7 +644,8 @@ async function main() {
       creatorContentSummary.durationMs +
       prodReadinessSummary.durationMs +
       progMediaSecSummary.durationMs +
-      talentSimSummary.durationMs
+      talentSimSummary.durationMs +
+      finHistSummary.durationMs
     }ms`
   );
   console.log('========================================================================\n');

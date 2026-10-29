@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de homologação externa, validação estrita de configuração PSP, sanitização de segredos, bloqueio fail-closed (PSP_NOT_CONFIGURED_FOR_PRODUCTION), rota Express de despacho PIX e automação das 6 verificações obrigatórias.",
-  "updatedAt":  "2026-10-28T19:30:02.374934833Z",
+  "summary":  "Plano de implementação para o refinamento do Ranking Financeiro de Criadores no Painel Central Administrativo, adicionando popovers analíticos acessíveis (origem, fórmula, período, moeda BRL vs Créditos, status e limitações), gráficos compactos de barras de decomposição contábil (Parcela Criador 70%, Taxa JOBS 30%, Taxas PSP e Estornos) sincronizados com o período selecionado, comparação temporal com o período anterior equivalente e suíte completa de 12 testes automatizados.",
+  "updatedAt":  "2026-10-29T01:58:45.626705432Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
