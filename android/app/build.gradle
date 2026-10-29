@@ -16,6 +16,17 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv("JOBS_UPLOAD_STORE_FILE")
+            if (keystorePath != null && !keystorePath.trim().isEmpty()) {
+                storeFile file(keystorePath)
+                storePassword System.getenv("JOBS_UPLOAD_STORE_PASSWORD")
+                keyAlias System.getenv("JOBS_UPLOAD_KEY_ALIAS")
+                keyPassword System.getenv("JOBS_UPLOAD_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         debug {
             applicationIdSuffix ".debug"
@@ -23,6 +34,10 @@ android {
             debuggable true
         }
         release {
+            def keystorePath = System.getenv("JOBS_UPLOAD_STORE_FILE")
+            if (keystorePath != null && !keystorePath.trim().isEmpty()) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

@@ -1,5 +1,5 @@
 {
-  "summary":  "Relatório técnico completo do Gate Final de Qualidade, Testes, Segurança, Integridade Financeira (70/30) e Preparação Android (Google Play Store) do JOBS, cobrindo o inventário real das 18 telas, execução de 376 testes automatizados (100% aprovados), correção de bug real de login por e-mail em authService.ts, build web + sincronização Capacitor Android e diagnóstico de prontidão para publicação.",
-  "updatedAt":  "2026-10-29T19:30:00.204138852Z",
+  "summary":  "Relatório completo da etapa de desbloqueio do release do JOBS com CI verificável (Fases 1 a 5), incluindo inspeção de dependências/versões, pipeline web em GitHub Actions com captura de logs, validação Android Capacitor/Gradlew, mapeamento das 18 telas x testes x lacunas e diagnóstico de bloqueadores de publicação.",
+  "updatedAt":  "2026-10-29T19:50:54.233660531Z",
   "userFacing":  true
 }

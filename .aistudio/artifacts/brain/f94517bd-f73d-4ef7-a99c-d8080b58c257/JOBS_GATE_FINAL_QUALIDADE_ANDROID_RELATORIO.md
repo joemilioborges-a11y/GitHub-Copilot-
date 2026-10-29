@@ -1,112 +1,107 @@
-# JOBS — Relatório Oficial de Gate Final de Qualidade, Testes, Segurança e Publicação Android
+# JOBS — Relatório de Desbloqueio do Release com CI Verificável (Fases 1 a 5)
 
-**Branch de Trabalho:** `release/gate-final-android-qa` (criada a partir de `tdd/interactive-challenges-consent`; branch `main` preservada intacta)  
-**Data da Auditoria:** 29/10/2026  
-**Escopo:** Auditoria e validação completa das Etapas 1 a 6 antes da publicação na Google Play Store.
-
----
-
-## Etapa 1 — Inventário Real das 18 Telas
-
-Todas as **18 telas oficiais** registradas em `ScreenId` (`src/types.ts`), catalogadas em `ALL_18_SCREENS` (`src/components/ScreenSwitcherModal.tsx`) e roteadas em `src/App.tsx` foram inspecionadas individualmente no código-fonte, além das visões transversais (`LiveStreamView.tsx`, `WalletModal.tsx` e `CentralAdminDashboardModal.tsx`).
-
-| # | ScreenId | Nome Oficial | Arquivo Físico | Rotas de Entrada | Rotas de Saída | Ações, Dependências e Armazenamento (`localStorage` / Backend) | Cobertura Automatizada |
-| :- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **01** | `01_landing` | Abertura do Aplicativo | `src/components/screens/Screen01Landing.tsx` | Inicialização sem sessão ativa; Logout (`16_settings`); Exclusão de conta (`17_privacy_security`); `ScreenSwitcherModal` | `02_register`, `03_login`, `09_discover`, `17_privacy_security`, `GlobalVisionModal` | Apresentação institucional +18, CTAs de entrada e manifesto global | `GATE-18S-01`, `GATE-FUNC-01` |
-| **02** | `02_register` | Cadastro | `src/components/screens/Screen02Register.tsx` | `01_landing`, `03_login` | `04_age_gate` (sucesso), `03_login`, `17_privacy_security` | `authService.register()`: validação de unicidade de e-mail/usuário, hash SHA-256 + salt aleatório via Web Crypto API, gravação em `jobs_database_accounts` e `jobs_current_session` | `GATE-18S-01`, `GATE-FUNC-01` |
-| **03** | `03_login` | Login | `src/components/screens/Screen03Login.tsx` | `01_landing`, `02_register`, `05_password_recovery` | `08_home` (se `+18` verificado) ou `04_age_gate`, `02_register`, `05_password_recovery` | `authService.login()`: autenticação por e-mail ou `@username` com verificação de hash SHA-256+salt; persiste `jobs_current_session`, `jobs_auth_user`, `jhobs_user_profile_data` | `GATE-18S-01`, `GATE-FUNC-01` *(corrigido bug de login por e-mail)* |
-| **04** | `04_age_gate` | Verificação de Idade (+18) | `src/components/screens/Screen04AgeGate.tsx` | `02_register`, `03_login` (quando `verified18 === false`) | `06_profile_creation` (aprovado >= 18 anos), `01_landing` (menor de 18 bloqueado) | Cálculo de maioridade por data de nascimento; `authService.updateAccountProfile()`; persiste `jhobs_age_verified` e `jhobs_user_profile_data` | `GATE-18S-01`, `GATE-FUNC-01` |
-| **05** | `05_password_recovery` | Recuperação de Senha | `src/components/screens/Screen05PasswordRecovery.tsx` | `03_login`, `16_settings` | `03_login` | `authService.resetPassword()`: gera novo salt de 16 bytes e novo hash SHA-256 em `jobs_database_accounts` | `GATE-18S-01`, `GATE-FUNC-01` |
-| **06** | `06_profile_creation` | Criação de Perfil | `src/components/screens/Screen06ProfileCreation.tsx` | `04_age_gate`, `16_settings` | `07_preferences`, `CreatorContentStudioModal` | Edição de bio, ocupação, cidade, interesses, signo, altura e hábitos; `authService.updateAccountProfile()`, `jhobs_user_profile_data` | `GATE-18S-01`, `GATE-FUNC-01`, `creatorContentAndVipVault.test.ts` |
-| **07** | `07_preferences` | Preferências de Relacionamento | `src/components/screens/Screen07RelationshipPreferences.tsx` | `06_profile_creation`, `09_discover`, `16_settings` | `08_home` | Configuração de objetivos, faixa etária, distância e interesses; atualiza `jhobs_user_profile_data` | `GATE-18S-01`, `GATE-FUNC-01` |
-| **08** | `08_home` | Tela Inicial (Dashboard) | `src/components/screens/Screen08HomeDashboard.tsx` | `03_login`, `07_preferences`, `Navbar` (`home`) | `09_discover`, `10_profile_detail`, `11_connections`, `12_chat`, `15_subscriptions`, `lives`, `WalletModal`, `InteractiveChallengesModal`, `TalentWorthSection` | Consome `financialLedger`, `creatorRankingAnalyticalService`, `talentChallengesSimulationService`, `liveStreamService`; exibe resumo de carteira, ranking auditado e seção "Seu talento vale muito!" | `GATE-18S-01`, `homeWalletSectionAudit.test.ts`, `talentChallengesSimulation.test.ts`, `creatorFinancialRankingRefinementTests.ts` |
-| **09** | `09_discover` | Descoberta de Pessoas | `src/components/screens/Screen09Discover.tsx` | `08_home`, `Navbar` (`discover`), `01_landing`, `11_connections` | `10_profile_detail`, `07_preferences`, `12_chat` (Super Interesse), `MatchCelebrationModal` | `matchAndMessagingService.recordLike()`, `exclusiveContentAndInterestService.sendPaidImmediateInterest()`, `proximityPrivacyService` (grade espacial ~1,6 km sem GPS exato), `discoveryAndLiveFilters` | `GATE-18S-01`, `GATE-FUNC-02`, `discoveryAndLiveFilters.test.ts`, `proximityPrivacyService.test.ts` |
-| **10** | `10_profile_detail` | Perfil Detalhado | `src/components/screens/Screen10ProfileDetail.tsx` | `08_home`, `09_discover`, `11_connections` | `09_discover`, `12_chat`, `13_video_call`, `18_reports_blocks` | `exclusiveContentAndInterestService` (desbloqueio de fotos/vídeos e Cofre VIP 70/30), `protectedMediaService` (URL assinada TTL 900s + teaser SVG + `FLAG_SECURE`), bloqueio e denúncia | `GATE-18S-01`, `GATE-SEC-03`, `exclusiveContentAndInterestService.test.ts`, `protectedMediaSecurity.test.ts` |
-| **11** | `11_connections` | Conexões (Matches) | `src/components/screens/Screen11Connections.tsx` | `08_home`, `Navbar` (`connections`), `12_chat` | `12_chat`, `10_profile_detail`, `09_discover` | Lista matches mútuos confirmados (`jobs_user_connections` + `matchAndMessagingService`), busca e filtro de conexões | `GATE-18S-01`, `GATE-FUNC-02`, `matchAndMessagingService.test.ts` |
-| **12** | `12_chat` | Conversas (Chat 1:1) | `src/components/screens/Screen12Chat.tsx` | `08_home`, `09_discover`, `10_profile_detail`, `11_connections`, `13_video_call`, `14_notifications`, `Navbar` (`messages`) | `13_video_call`, `10_profile_detail`, `18_reports_blocks`, `11_connections` | `matchAndMessagingService.sendMessage()`, quebra-gelos `/api/gemini/generate`, envio de presentes virtuais (`financialLedger`), bloqueio e denúncia | `GATE-18S-01`, `GATE-FUNC-02`, `matchAndMessagingService.test.ts` |
-| **13** | `13_video_call` | Chamadas de Vídeo | `src/components/screens/Screen13VideoCall.tsx` | `10_profile_detail`, `12_chat` | `12_chat`, `18_reports_blocks` | Controles de câmera/microfone, envio de mimos em chamada (`financialLedger` 70/30), encerramento seguro e reporte | `GATE-18S-01`, `GATE-FUNC-02` |
-| **14** | `14_notifications` | Notificações | `src/components/screens/Screen14Notifications.tsx` | `Navbar` (ícone de sino) | `12_chat`, `11_connections`, `15_subscriptions`, `08_home` | Filtros por tipo (`vip_unlock`, `message`, `live`, `system`), marcar todas como lidas, limpar histórico | `GATE-18S-01`, `GATE-FUNC-02` |
-| **15** | `15_subscriptions` | Assinaturas (Monetização) | `src/components/screens/Screen15Subscriptions.tsx` | `08_home`, `Navbar` (`subscriptions`) | `WalletModal`, `08_home` | Planos Free, Gold/Premium e Diamond VIP; persiste `jobs_user_subscription`; abertura da carteira de créditos | `GATE-18S-01`, `monetizationService` |
-| **16** | `16_settings` | Configurações | `src/components/screens/Screen16Settings.tsx` | `Navbar` (`profile`) | `06_profile_creation`, `07_preferences`, `15_subscriptions`, `17_privacy_security`, `18_reports_blocks`, `01_landing` (Logout) | Preferências de conta, notificações, som e idioma; `authService.logout()` limpa sessão ativa | `GATE-18S-01`, `GATE-FUNC-04` |
-| **17** | `17_privacy_security` | Privacidade e Segurança (LGPD) | `src/components/screens/Screen17PrivacySecurity.tsx` | `01_landing`, `02_register`, `16_settings` | `16_settings`, `01_landing` (exclusão de conta) | Controles de visibilidade, consentimento de IA, grade de proximidade aproximada (`proximityPrivacyService`), portabilidade JSON e exclusão de dados LGPD | `GATE-18S-01`, `GATE-FUNC-04`, `proximityPrivacyService.test.ts` |
-| **18** | `18_reports_blocks` | Denúncias e Bloqueios | `src/components/screens/Screen18ReportsBlocks.tsx` | `10_profile_detail`, `12_chat`, `13_video_call`, `16_settings` | `16_settings` | Gestão de `jhobs_blocked_user_ids` (desbloqueio imediato + revogação de mídia em `protectedMediaService`) e abertura de tickets em `jobs_user_reports` | `GATE-18S-01`, `GATE-FUNC-04`, `protectedMediaSecurity.test.ts` |
-| **Transversal** | `lives` | Lives, Batalhas, Palco e Desafios | `src/components/LiveStreamView.tsx` | `Navbar` (`lives`), `08_home` | `WalletModal`, `08_home` | `liveStreamService`, `useLiveStreamView`, desbloqueio de sala VIP, mimos 70/30, batalhas e votação consensual idempotente por participante (`voters` / `votedParticipantIds`) | `GATE-FUNC-03`, `liveAndAuditVerificationTests.ts` (`TC-CHAL-VOTE-01..07`), `liveStreamViewHookTests.ts` |
+**Branch de trabalho**: `release/gate-final-android-qa`
+**Branch `main` (intocada)**: `da7275802019442ed17492b513850402409e2565`
+**Status da aprovação para publicação na Google Play**: **NÃO APROVADO PARA PUBLICAÇÃO IMEDIATA** (bloqueadores objetivos listados na Fase 5).
 
 ---
 
-## Etapa 2 — Execução dos Testes, Build e Diagnóstico de CI
+## Fase 1 — Inspeção Técnica do Ambiente e Repositório
 
-### 2.1 Inspeção de Configuração e CI
-- **`package.json` e `bun.lock`**: Dependências instaladas e íntegras em `node_modules` (React 19, Vite 8, Capacitor 8.3.0, Express, `@google/genai`, Firebase 12.12.0, TypeScript 5.8).
-- **`tsconfig.json`**: Configurado com `target: ES2022`, `moduleResolution: bundler`, `jsx: react-jsx`, `noEmit: true`.
-- **Workflows de CI (`.github/workflows/`)**:
-  - `.github/workflows/deno.yml`: Template genérico do GitHub (`deno lint` e `deno test -A`), **incompatível** com a stack Node/Vite/TSX do projeto.
-  - `.github/workflows/gradle-publish.yml`: Template genérico do GitHub que executa `./gradlew build` e `./gradlew publish` na raiz do repositório (onde não existe `gradlew`, pois o wrapper Android está em `android/gradlew`).
+### 1.1 Arquivos inspecionados
+- `package.json` e `package-lock.json`
+- `tsconfig.json`
+- `capacitor.config.ts`
+- `android/build.gradle`, `android/variables.gradle`, `android/app/build.gradle`, `android/app/src/main/AndroidManifest.xml`, `android/gradle/wrapper/gradle-wrapper.properties`, `android/gradlew`
+- `.github/workflows/deno.yml` e `.github/workflows/gradle-publish.yml` (presentes no commit `da72758` da `main`)
+- `.github/workflows/android-release-gate.yml`
+- `scripts/runVerificationTests.ts` e suítes em `src/utils/*VerificationTests.ts`
 
-### 2.2 Comandos Executados e Resultados Verificáveis
+### 1.2 Gerenciador de pacotes e matriz de versões compatíveis
+| Componente | Configuração Encontrada | Evidência no Repositório |
+|---|---|---|
+| **Gerenciador de Pacotes** | `npm` com lockfile v3 (`package-lock.json`) | `package.json` + `package-lock.json` na raiz |
+| **Node.js** | `22.x` | `@types/node: ^22.14.0`, Vite `^8.3.0`, TypeScript `^7.0.2` |
+| **Java / JDK** | **JDK 21** (`JavaVersion.VERSION_21`) | `android/capacitor-cordova-android-plugins/build.gradle` e `@capacitor/android: ^8.5.3` |
+| **Gradle Wrapper** | `Gradle 8.14.3` + AGP `8.13.0` | `android/gradle/wrapper/gradle-wrapper.properties` e `android/build.gradle` |
+| **Android SDK** | `minSdkVersion = 24`, `compileSdkVersion = 36`, `targetSdkVersion = 36` | `android/variables.gradle` |
+| **Identificador do Pacote** | `com.jobs.app` (`webDir: 'dist'`) | `capacitor.config.ts` e `android/app/build.gradle` |
 
-| Ordem | Etapa | Comando Executado | Código de Saída | Resultado e Evidência Real |
-| :- | :--- | :--- | :-: | :--- |
-| **1** | Verificação TypeScript (`lint` / `typecheck`) | `npm run typecheck` (`tsc --noEmit`) | `0` | **Aprovado** — 0 erros de tipagem em todo o repositório. |
-| **2** | Testes Automatizados Completos | `npm run test` (`tsx scripts/runVerificationTests.ts`) | `0` | **Aprovado** — **376 / 376 casos de teste aprovados (100,0%)**, 0 falhas, tempo total `1407ms`. |
-| **3** | Build Web de Produção | `vite build` (via `npm run build:android`) | `0` | **Aprovado** — `2346` módulos transformados em `3.52s` (`dist/index.html`, `dist/assets/index-DKWzpKBG.css`, `dist/assets/index-dCY8kKUx.js`). |
-| **4** | Sincronização Capacitor Android | `cap sync android` (via `npm run build:android`) | `0` | **Aprovado** — Ativos web copiados de `dist` para `android/app/src/main/assets/public` e `capacitor.config.json` atualizado em `0.181s`. |
-| **5** | Compilação Nativa Android (Gradle) | `sh ./android/gradlew -p android assembleDebug` | `1` | **Bloqueado pelo ambiente do container** — `ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.` (`ANDROID_HOME=UNSET`, `ANDROID_SDK_ROOT=UNSET`). |
-
----
-
-## Etapa 3 — Testes Funcionais e Correção de Falha Reproduzida
-
-Durante a execução da nova suíte funcional (`GATE-FUNC-01` a `GATE-FUNC-04`), foi reproduzida e corrigida uma falha real no fluxo de login por e-mail (`Screen03Login.tsx` / `src/utils/authService.ts`):
-
-- **Falha Reproduzida (`GATE-FUNC-01`)**: Em `src/utils/authService.ts` (linha 213), o método `authService.login(identifier, rawPassword)` executava `const cleanId = identifier.trim().toLowerCase().replace('@', '')`. Ao remover o caractere `@` de qualquer identificador, o login por endereço de e-mail (incluindo o botão de login demonstrativo `membro.vip@jobs.app` em `Screen03Login.tsx` e o login pós-recuperação de senha) falhava sistematicamente porque `a.email.toLowerCase()` continha `@` enquanto `cleanId` havia perdido o `@`.
-- **Correção Mínima Aplicada (`src/utils/authService.ts`)**: Preservado `rawIdentifier = identifier.trim().toLowerCase()` para comparação exata com `a.email.toLowerCase()`, removendo apenas `@` inicial (`rawIdentifier.replace(/^@/, '')`) para comparação com `a.username.toLowerCase()`.
-- **Validação de Regressão**: `GATE-FUNC-01` passou a aprovar integralmente o ciclo `Cadastro -> Bloqueio de Duplicidade -> Senha Incorreta Rejeitada -> Age Gate +18 -> Redefinição de Senha -> Login por E-mail`.
+### 1.3 Diagnóstico dos workflows legados (em `main`)
+- **`.github/workflows/deno.yml`**: configurava `denoland/setup-deno@v2` e executava `deno test`, incompatível com a stack React + Vite + Node.js/TypeScript (`tsx`).
+- **`.github/workflows/gradle-publish.yml`**: executava `./gradlew build` na raiz do repositório (onde `./gradlew` não existe; o wrapper fica em `android/gradlew`) e tentava publicar pacotes Maven no GitHub Packages.
+- **Solução aplicada na branch `release/gate-final-android-qa`**: remoção dos dois templates incompatíveis e consolidação em `.github/workflows/android-release-gate.yml`.
 
 ---
 
-## Etapa 4 — Segurança, Privacidade e Integridade Financeira (70/30)
+## Fase 2 — Pipeline Web Reprodutível com Captura de Logs
 
-1. **Autenticação e Autorização no Servidor (`src/serverApp.ts` — `GATE-SEC-01`)**:
-   - `GET /api/ledger/readiness`: Retorna HTTP `200` com diagnóstico dos 9 critérios financeiros e validação da cadeia SHA-256 (`ledgerIntegrity.valid: true`).
-   - `GET /api/ledger/balance/:userId`: Bloqueia acesso cruzado entre usuários (`x-actor-user-id != :userId`) com HTTP `403 Forbidden` (Anti-IDOR).
-   - `POST /api/ledger/payouts/request`: Bloqueia solicitação de saque quando `x-actor-user-id != creatorId` com HTTP `403 Forbidden`.
-   - `POST /api/ledger/payouts/dispatch`: Opera em modo *fail-closed* para produção sem PSP homologado (`404`/`503`).
-   - `POST /api/webhooks/pix`: Rejeita payloads com assinatura HMAC-SHA256 inválida ou forjada com HTTP `401 Unauthorized`.
-2. **Regras de Segurança do Banco (`firestore.rules`)**:
-   - *Default Deny* global (`allow read, write: if false;` na raiz).
-   - Coleções `/ledger_entries`, `/payout_records`, `/psp_webhook_events`, `/admin_audit_logs`, `/media_access_grants` e `/signed_media_deliveries` protegidas contra escrita/adulteração direta por clientes comuns.
-   - Coleção `/media_items` impede autoaprovação por criadores (`moderationStatus == 'pending'` obrigatório na criação/edição pelo criador).
-3. **Integridade Contábil e Divisão 70/30 (`src/services/ledgerService.ts` — `GATE-SEC-02`)**:
-   - Nenhum arquivo financeiro (`ledgerService.ts`) foi modificado.
-   - Validado com contas de teste isoladas em `sandbox`: compra de `200` créditos, desbloqueio de conteúdo de `100` créditos (`R$ 10,00`), resultando em **R$ 7,00 (70%)** para o criador e **R$ 3,00 (30%)** para a plataforma, com proteção contra replay idempotente (`isReplay: true`) e bloqueio estrito de saldo negativo.
-4. **Isolamento Simulação vs. Produção (`PROD-ISO-01` a `PROD-ISO-06`)**:
-   - Sementes sintéticas (`seedInitialLedger`, `ensureInitialLiveAuditEntries`, `talentChallengesSimulationService`) são estritamente bloqueadas quando `runtimeEnvironmentService.getMode() === 'production'`.
+O job **`web-pipeline`** em `.github/workflows/android-release-gate.yml` foi estruturado com `set -o pipefail`, gravação individual de logs em `ci-logs/`, registro de status em `ci-logs/step-status.txt`, anotações `::error` indicando exatamente a etapa que falhou e upload de artefatos (`if: always()`):
+
+1. **Instalação reproduzível (`npm ci`)** -> `ci-logs/01-npm-ci.log`
+2. **Execução da suíte de testes (`npm run test`)** -> `ci-logs/02-npm-test.log`
+3. **Verificação TypeScript (`npm run typecheck`)** -> `ci-logs/03-typecheck.log`
+4. **Build Web de produção (`npm run build`)** -> `ci-logs/04-web-build.log`
+5. **Publicação de resumo (`$GITHUB_STEP_SUMMARY`) e upload de `jobs-web-pipeline-logs`**
 
 ---
 
-## Etapa 5 — Configuração Android, Capacitor e Requisitos Google Play
+## Fase 3 — Validação Android (`com.jobs.app`)
 
-### 5.1 Itens Verificados e Conformes (`GATE-AND-01`)
-- **`capacitor.config.ts`**: `appId: 'com.jobs.app'`, `appName: 'JOBS'`, `webDir: 'dist'`.
-- **`android/variables.gradle`**: `minSdkVersion = 24` (Android 7.0), `compileSdkVersion = 36`, `targetSdkVersion = 36` (atende e supera a exigência da Google Play Store de API 34/35+).
-- **`android/app/build.gradle`**: `namespace "com.jobs.app"`, `applicationId "com.jobs.app"`, `versionCode 1`, `versionName "1.0.0"`.
-- **`android/app/src/main/AndroidManifest.xml`**: Declara `android.permission.INTERNET`, ícones adaptativos `@mipmap/ic_launcher` e `@mipmap/ic_launcher_round` (`mipmap-anydpi-v26` com foreground/background vetoriais e PNGs legacy em `mdpi` a `xxxhdpi`) e `FileProvider`.
+O job **`android-validation`** (`needs: web-pipeline`) executa em runner `ubuntu-latest` com Node.js 22, JDK 21 (Temurin) e Android SDK (`android-actions/setup-android@v3`):
 
-### 5.2 Lacunas e Pendências Obrigatórias Antes da Publicação na Google Play Store
+1. **Build Web + Sincronização Capacitor (`npm ci && npm run build:android`)** -> `ci-logs-android/05-cap-sync-android.log`
+2. **Auditoria automatizada do pacote `com.jobs.app`** -> `ci-logs-android/06-android-config-check.log`
+   - Confirma `appId: 'com.jobs.app'`, `minSdkVersion = 24`, `targetSdkVersion = 36`, permissões `INTERNET`, `CAMERA`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` e `<uses-feature android:required="false" />`.
+3. **Compilação Android (`./android/gradlew -p android assembleDebug --stacktrace`)** -> `ci-logs-android/07-gradle-assemble-debug.log`
+4. **Upload dos logs e do APK de debug (`jobs-android-validation-artifacts`)**
 
-| Severidade | ID | Achado Técnico | Impacto na Publicação | Ação Recomendada Antes do Release |
-| :-: | :- | :--- | :--- | :--- |
-| **CRÍTICA (Bloqueio de Ambiente)** | `AND-BLK-01` | Ausência de JDK (`java`/`JAVA_HOME`) e Android SDK (`ANDROID_HOME`) no container Linux de desenvolvimento, além de `android/gradlew` sem bit de execução (`chmod +x`). | Impede a geração local dos artefatos `.apk` / `.aab` dentro deste container. | Executar `./gradlew bundleRelease` em ambiente CI/CD ou estação com JDK 17/21 + Android SDK API 36 instalados e aplicar `chmod +x android/gradlew`. |
-| **ALTA (Requisito Play Store)** | `AND-SIGN-01` | `android/app/build.gradle` não possui bloco `signingConfigs.release` configurado para assinatura de produção (Play App Signing) e `minifyEnabled` está `false`. | A Google Play Console rejeita uploads de `.aab` não assinados com chave de upload de produção. | Configurar `signingConfigs.release` lendo `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` e `KEY_PASSWORD` via variáveis de ambiente seguras no CI. |
-| **ALTA (Segurança de Produção)** | `SEC-AUTH-01` | Os endpoints em `src/serverApp.ts` (`/api/ledger/*`) validam identidade via cabeçalho `x-actor-user-id`, mas ainda não verificam criptograficamente o JWT `Bearer` do Firebase Admin SDK no servidor. | Em produção aberta, um cliente malicioso fora do app poderia forjar o cabeçalho `x-actor-user-id` se o endpoint estiver exposto sem gateway autenticador. | Integrar `firebase-admin` (`auth().verifyIdToken(bearerToken)`) como middleware obrigatório em `src/serverApp.ts` antes de habilitar tráfego real. |
-| **MÉDIA (Permissões Nativas)** | `AND-PERM-01` | `AndroidManifest.xml` declara apenas `INTERNET`. Para uso nativo de WebRTC (`Screen13VideoCall` e `LiveStreamView`), o WebView Android requer `CAMERA`, `RECORD_AUDIO` e `MODIFY_AUDIO_SETTINGS`. | Chamadas de vídeo e transmissão ao vivo no app Android nativo podem falhar ao solicitar câmera/microfone. | Declarar `CAMERA`, `RECORD_AUDIO` e `MODIFY_AUDIO_SETTINGS` no `AndroidManifest.xml` e tratar `onPermissionRequest` no `WebChromeClient` se o recurso de vídeo ao vivo nativo for habilitado no lançamento. |
-| **MÉDIA (CI/CD)** | `CI-WORKFLOW-01` | `.github/workflows/deno.yml` e `gradle-publish.yml` são templates padrão que apontam para `deno` e `./gradlew` na raiz (em vez de `android/gradlew`). | Pipelines do GitHub Actions falharão ao rodar em `main` ou em releases. | Substituir por workflow Node 22 + JDK 17 + Android SDK executando `npm ci`, `npm run typecheck`, `npm run test`, `npm run build:android` e `./android/gradlew -p android bundleRelease`. |
-| **BAIXA (Otimização WebView)** | `WEB-CHUNK-01` | O bundle JS principal (`dist/assets/index-dCY8kKUx.js`) possui `3,78 MB` (`899 kB` gzip) devido à importação estática combinada das 18 telas e Firebase SDK. | Maior tempo de *cold start* inicial no WebView Android. | Aplicar `React.lazy()` por grupo de telas e unificar importação de `src/firebase.ts`. |
+### Pendências identificadas de versão, permissões, ícones e assinatura
+- **Versão**: Configurada em `android/app/build.gradle` como `versionCode 1` e `versionName "1.0.0"`. Deve ser incrementada a cada novo upload no Google Play Console.
+- **Permissões**: `INTERNET`, `ACCESS_NETWORK_STATE`, `CAMERA`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `READ_MEDIA_IMAGES` e `READ_EXTERNAL_STORAGE (maxSdkVersion=32)` declaradas em `AndroidManifest.xml`, com `<uses-feature>` de câmera e microfone marcadas como `android:required="false"`.
+- **Ícones**: A estrutura XML de ícones adaptativos (`mipmap-anydpi-v26/ic_launcher.xml` e `ic_launcher_round.xml`) está presente, porém os PNGs/WebPs em `mipmap-*` ainda são os **ícones padrão do template Capacitor** — devem ser substituídos pela arte oficial da marca JOBS antes da listagem pública na loja.
+- **Assinatura de Release**: `android/app/build.gradle` lê `JOBS_UPLOAD_STORE_FILE`, `JOBS_UPLOAD_STORE_PASSWORD`, `JOBS_UPLOAD_KEY_ALIAS` e `JOBS_UPLOAD_KEY_PASSWORD` exclusivamente de variáveis de ambiente. Nenhuma keystore ou senha foi gravada no repositório.
 
 ---
 
-## Etapa 6 — Parecer Final de Prontidão
+## Fase 4 — Cobertura Funcional das 18 Telas e Lacunas Explícitas
 
-- **Qualidade Funcional, Tipagem, Segurança Lógica e Livro-Razão 70/30:** **COMPROVADA E APROVADA** (`376/376` testes automatizados passando, `0` erros TypeScript, `vite build` e `cap sync android` concluídos com código `0`).
-- **Compilação do Binário `.aab` / `.apk` e Publicação na Google Play Store:** **PENDENTE DE AMBIENTE COM JDK/ANDROID SDK E CHAVE DE ASSINATURA DE PRODUÇÃO** (bloqueio ambiental documentado com transparência; nenhuma publicação externa foi executada).
+| # | ScreenId | Arquivo Físico | Fluxos Críticos Associados | Testes Automatizados Existentes / Adicionados | Lacunas Sem Automação (UI / Nativo) |
+|---|---|---|---|---|---|
+| 01 | `01_landing` | `Screen01Landing.tsx` | Entrada pública, CTAs para Cadastro/Login | `GATE-18S-01` (inventário e rota `App.tsx`) | Renderização visual DOM/E2E em navegador real |
+| 02 | `02_register` | `Screen02Register.tsx` | Cadastro com validação de e-mail único e hash SHA-256+salt | `GATE-FUNC-01` (`authService.register` + bloqueio de duplicidade) | Submissão interativa de formulário DOM |
+| 03 | `03_login` | `Screen03Login.tsx` | Login por e-mail ou `@username`, bloqueio de senha inválida | `GATE-FUNC-01` (`authService.login` com e-mail contendo `@` e senha inválida) | Submissão interativa de formulário DOM |
+| 04 | `04_age_gate` | `Screen04AgeGate.tsx` | Verificação obrigatória de maioridade (+18) | `GATE-FUNC-01` (`updateAccountProfile({ verified18: true })`) | Fluxo visual de bloqueio para menor de 18 anos no navegador |
+| 05 | `05_password_recovery` | `Screen05PasswordRecovery.tsx` | Redefinição de senha com re-hash criptográfico | `GATE-FUNC-01` (`authService.resetPassword` + login pós-reset) | Fluxo de envio de código por e-mail externo (SMTP/transacional) |
+| 06 | `06_profile_creation` | `Screen06ProfileCreation.tsx` | Criação de perfil, bio, cidade e fotos | `GATE-FUNC-01` (`updateAccountProfile`) | Upload real de fotos para storage em nuvem |
+| 07 | `07_preferences` | `Screen07RelationshipPreferences.tsx` | Preferências de relacionamento e busca | `GATE-FUNC-01` (`updateAccountProfile({ seeking })`) | Interação de sliders/chips na UI |
+| 08 | `08_home` | `Screen08HomeDashboard.tsx` | Painel principal, atalhos para Lives, Carteira e Admin | `GATE-18S-01` + `adminAuditVerificationTests.ts` | Teste E2E de navegação clicável no dashboard |
+| 09 | `09_discover` | `Screen09Discover.tsx` | Descoberta de perfis, curtidas, privacidade espacial e ranking | `GATE-FUNC-02`, `proximityPrivacyVerificationTests.ts`, `creatorSearchRankingVerificationTests.ts` | Gestos de swipe/cards no DOM |
+| 10 | `10_profile_detail` | `Screen10ProfileDetail.tsx` | Perfil detalhado, mídias exclusivas (49/99 💎), Cofre VIP (149 💎), mimo e Super Interesse | `exclusiveContentAndInterestVerificationTests.ts`, `protectedMediaVerificationTests.ts`, `GATE-SEC-03` | Renderização visual de modais de desbloqueio |
+| 11 | `11_connections` | `Screen11Connections.tsx` | Lista de matches mútuos confirmados | `GATE-FUNC-02` (`isMutualMatch`, curtida unilateral vs. recíproca) | Interação de abas na UI |
+| 12 | `12_chat` | `Screen12Chat.tsx` | Mensagens persistentes 1:1 pós-match | `GATE-FUNC-02` (`sendMessage`, `getMessages`) | WebSocket/tempo real multi-dispositivo |
+| 13 | `13_video_call` | `Screen13VideoCall.tsx` | Chamada de vídeo privada (`getUserMedia`), controles de mídia e denúncia | `GATE-FUNC-05` (contrato `getUserMedia`, `onEndCall`, `onReport`) + `GATE-AND-01` (permissões Android) | **Sem teste automatizado de stream WebRTC P2P real** em câmera/microfone físicos |
+| 14 | `14_notifications` | `Screen14Notifications.tsx` | Listagem, filtros, marcar como lidas e limpar notificações | `GATE-FUNC-05` (contratos de filtragem, leitura e limpeza) | **Sem teste automatizado de Push Notification nativo (FCM/APNs)** |
+| 15 | `15_subscriptions` | `Screen15Subscriptions.tsx` | Planos Gratuito, JOBS Premium (199 💎) e VIP (349 💎) | `GATE-FUNC-05` (`purchaseJobsPremiumSubscription` em sandbox + idempotência) | Renovação recorrente automática no servidor após 30 dias |
+| 16 | `16_settings` | `Screen16Settings.tsx` | Configurações de conta, idioma, alertas, estúdio do criador e logout | `GATE-FUNC-05` (contratos de roteamento e logout) | Persistência de preferências de som/idioma no backend |
+| 17 | `17_privacy_security` | `Screen17PrivacySecurity.tsx` | Controles de visibilidade, modo invisível, portabilidade LGPD Art. 18 e exclusão de conta | `GATE-FUNC-04` (grade espacial) + `GATE-FUNC-05` (contratos LGPD Art. 18 e exclusão) | Expurgo físico cascata em banco de dados remoto de produção |
+| 18 | `18_reports_blocks` | `Screen18ReportsBlocks.tsx` | Bloqueio/desbloqueio de perfis e protocolo de denúncias (`ReportTicket`) | `GATE-FUNC-04` (persistência de bloqueios) + `GATE-FUNC-05` (categorias de denúncia e desbloqueio) | Fila de triagem de denúncias persistida em backend multiusuário |
+| Transversal | `LiveStreamView.tsx` | `src/components/LiveStreamView.tsx` | Transmissões ao vivo, desbloqueio pago (70/30), presentes e votação consensual por identidade única | `liveAndAuditVerificationTests.ts` (`LIVE-TDD-VOTE-01..07`) + `GATE-FUNC-03` | Streaming de vídeo RTMP/WebRTC real |
+| Transversal | `WalletModal.tsx` | `src/components/WalletModal.tsx` | Carteira de créditos/diamantes, pacotes oficiais, ledger 70/30, saques PIX e anti-IDOR | `ledgerVerificationTests.ts`, `financialHistoryVerificationTests.ts`, `GATE-SEC-01`, `GATE-SEC-02` | Liquidação bancária real homologada com PSP PIX em produção |
+
+---
+
+## Fase 5 — Resultados Reais, Estado Android e Bloqueadores de Publicação
+
+### 5.1 Resultados das etapas executadas localmente
+- **`npm run test`**: **378 / 378 asserções aprovadas (100,0%)** em 12 suítes automatizadas (incluindo `GATE-FUNC-05` e `GATE-AND-02`).
+- **`npm run typecheck`**: **APROVADO** (`tsc --noEmit` com exit code `0`).
+- **`npm run build`**: **APROVADO** (bundle web de produção gerado em `dist/`).
+- **`npx cap sync android`**: **APROVADO** (assets web copiados para `android/app/src/main/assets/public`).
+- **`./android/gradlew -p android assembleDebug` (no container local)**: **BLOQUEADO POR AMBIENTE** (`ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH`). A compilação real do APK depende da execução do job `android-validation` no GitHub Actions (que provisiona JDK 21 + Android SDK 36).
+
+### 5.2 Bloqueadores restantes antes de autorizar a publicação na Google Play
+1. **Execução do workflow `android-release-gate.yml` em runner GitHub Actions com JDK 21 e Android SDK 36**: necessária para comprovar a geração real do artefato `.apk` / `.aab` fora do container sem Java.
+2. **Credenciais de Produção do PSP PIX e Segredos de Assinatura Android (`JOBS_UPLOAD_*`)**: o servidor opera corretamente em modo *fail-closed* (`HTTP 503`) para produção enquanto `JOBS_PSP_PIX_PROVIDER_URL`, `JOBS_PSP_PIX_API_TOKEN` e `JOBS_PSP_WEBHOOK_HMAC_SECRET` não estiverem configurados; o build de release assinado exige a keystore de upload via variáveis de ambiente no CI.
+3. **Substituição dos ícones padrão do template Capacitor**: atualizar os arquivos em `android/app/src/main/res/mipmap-*` com a identidade visual final do JOBS antes de submeter à loja.
+4. **Persistência de Estado em Servidor Multi-Instância**: migrar os registros atualmente mantidos em `localStorage` (como votos de desafios de Lives, mensagens e bloqueios) para banco de dados transacional no backend antes de escalar para múltiplos dispositivos em produção.

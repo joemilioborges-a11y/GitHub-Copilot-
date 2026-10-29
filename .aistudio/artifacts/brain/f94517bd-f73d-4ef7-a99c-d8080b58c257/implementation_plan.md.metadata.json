@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano do Gate Final de Qualidade, Testes, Segurança e Preparação Android para Google Play Store na branch release/gate-final-android-qa, incluindo assinatura de release via variáveis de ambiente, permissões WebRTC no AndroidManifest, workflow CI Node/Capacitor/Android e suíte de validação das 18 telas.",
-  "updatedAt":  "2026-10-29T19:37:37.386049111Z",
+  "summary":  "Plano técnico detalhado para implementação incremental e verificável do CI Web e Android do JOBS utilizando Bun e bun.lock, restaurando workflows originais (deno.yml e gradle-publish.yml), revertendo alterações fora do escopo na branch release/gate-final-android-qa e criando jobs-web-ci.yml e jobs-android-ci.yml separados.",
+  "updatedAt":  "2026-10-29T19:57:02.582076597Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

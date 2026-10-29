@@ -353,6 +353,78 @@ export async function runFinalReleaseGateVerificationSuite(): Promise<FinalRelea
     }
   );
 
+  await runCase(
+    'GATE-FUNC-05',
+    'ETAPA_3_FUNCIONAL',
+    'Fluxo funcional Telas 13, 14, 15, 16, 17 e 18: Assinatura JOBS Premium (Sandbox), VideoCall, Notificações, LGPD e Denúncias',
+    async () => {
+      // 1. Verifica contratos reais dos componentes Screen13..Screen18
+      const s13 = fs.readFileSync(path.join(rootDir, 'src/components/screens/Screen13VideoCall.tsx'), 'utf-8');
+      const s14 = fs.readFileSync(path.join(rootDir, 'src/components/screens/Screen14Notifications.tsx'), 'utf-8');
+      const s15 = fs.readFileSync(path.join(rootDir, 'src/components/screens/Screen15Subscriptions.tsx'), 'utf-8');
+      const s16 = fs.readFileSync(path.join(rootDir, 'src/components/screens/Screen16Settings.tsx'), 'utf-8');
+      const s17 = fs.readFileSync(path.join(rootDir, 'src/components/screens/Screen17PrivacySecurity.tsx'), 'utf-8');
+      const s18 = fs.readFileSync(path.join(rootDir, 'src/components/screens/Screen18ReportsBlocks.tsx'), 'utf-8');
+
+      if (!s13.includes('getUserMedia') || !s13.includes('onEndCall') || !s13.includes('onReport')) {
+        throw new Error('Screen13VideoCall sem integração com getUserMedia, encerramento ou denúncia.');
+      }
+      if (!s14.includes('onMarkAllAsRead') || !s14.includes('onClearAll') || !s14.includes('onSelectNotification')) {
+        throw new Error('Screen14Notifications sem callbacks obrigatórios de leitura/limpeza/seleção.');
+      }
+      if (!s15.includes('purchaseJobsPremiumSubscription') || !s15.includes('jobs_user_subscription')) {
+        throw new Error('Screen15Subscriptions sem integração com purchaseJobsPremiumSubscription.');
+      }
+      if (!s16.includes('onNavigateToPrivacy') || !s16.includes('onNavigateToReports') || !s16.includes('onLogout')) {
+        throw new Error('Screen16Settings sem rotas para Privacidade, Denúncias ou Logout.');
+      }
+      if (!s17.includes('LGPD Artigo 18') || !s17.includes('onDeleteAccount') || !s17.includes('invisibleMode')) {
+        throw new Error('Screen17PrivacySecurity sem exportação LGPD Art. 18, exclusão de conta ou modo invisível.');
+      }
+      if (!s18.includes('onUnblockProfile') || !s18.includes('onSubmitReport') || !s18.includes('menor_de_idade')) {
+        throw new Error('Screen18ReportsBlocks sem desbloqueio ou categorias críticas de denúncia.');
+      }
+
+      // 2. Exercita o fluxo de assinatura JOBS Premium (Tela 15) em ambiente sandbox com idempotência
+      const subBuyerId = `qa_sub_buyer_${Date.now()}`;
+      exclusiveContentAndInterestService.setUserDiamondWallet(subBuyerId, {
+        purchasedDiamonds: 300,
+        bonusDiamonds: 0,
+      });
+
+      const subIdempKey = `idemp_gate_sub_premium_${subBuyerId}`;
+      const subPurchase = await exclusiveContentAndInterestService.purchaseJobsPremiumSubscription({
+        buyerUserId: subBuyerId,
+        idempotencyKey: subIdempKey,
+        environment: 'sandbox',
+      });
+
+      if (!subPurchase.grant || subPurchase.transaction.diamondsCharged !== 199) {
+        throw new Error('Assinatura JOBS Premium não concedeu grant de 199 diamantes por 30 dias.');
+      }
+
+      const walletAfterSub = exclusiveContentAndInterestService.getUserDiamondWallet(subBuyerId);
+      if (walletAfterSub.totalAvailableDiamonds !== 101) {
+        throw new Error(
+          `Saldo de diamantes após assinatura JOBS Premium (300 - 199) incorreto: ${walletAfterSub.totalAvailableDiamonds}`
+        );
+      }
+
+      // Replay idempotente não deve debitar novamente
+      const subReplay = await exclusiveContentAndInterestService.purchaseJobsPremiumSubscription({
+        buyerUserId: subBuyerId,
+        idempotencyKey: subIdempKey,
+        environment: 'sandbox',
+      });
+      const walletAfterReplay = exclusiveContentAndInterestService.getUserDiamondWallet(subBuyerId);
+      if (!subReplay.isReplay || walletAfterReplay.totalAvailableDiamonds !== 101) {
+        throw new Error('Falha de idempotência na assinatura JOBS Premium.');
+      }
+
+      return `Telas 13..18 auditadas e assinatura JOBS Premium (199 💎 / 30d) validada com idempotência em sandbox (saldo 300 -> 101 💎).`;
+    }
+  );
+
   // =========================================================================
   // ETAPA 4 — SEGURANÇA NO SERVIDOR E INTEGRIDADE FINANCEIRA (70/30 + ISOLAMENTO)
   // =========================================================================
@@ -605,10 +677,25 @@ export async function runFinalReleaseGateVerificationSuite(): Promise<FinalRelea
       }
       if (
         !manifest.includes('android.permission.INTERNET') ||
+        !manifest.includes('android.permission.CAMERA') ||
+        !manifest.includes('android.permission.RECORD_AUDIO') ||
+        !manifest.includes('android.permission.MODIFY_AUDIO_SETTINGS') ||
+        !manifest.includes('android.hardware.camera') ||
+        !manifest.includes('android.hardware.microphone') ||
         !manifest.includes('@mipmap/ic_launcher') ||
         !manifest.includes('@mipmap/ic_launcher_round')
       ) {
-        throw new Error('AndroidManifest.xml sem permissão INTERNET ou referências de ícone adaptativo.');
+        throw new Error(
+          'AndroidManifest.xml sem permissões INTERNET/CAMERA/RECORD_AUDIO/MODIFY_AUDIO_SETTINGS, uses-feature ou ícones adaptativos.'
+        );
+      }
+
+      if (
+        !appGradle.includes('signingConfigs') ||
+        !appGradle.includes('JOBS_UPLOAD_STORE_FILE') ||
+        !appGradle.includes('JOBS_UPLOAD_KEY_ALIAS')
+      ) {
+        throw new Error('android/app/build.gradle não contém bloco signingConfigs.release via variáveis de ambiente.');
       }
 
       const icLauncherXml = path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml');
@@ -617,7 +704,47 @@ export async function runFinalReleaseGateVerificationSuite(): Promise<FinalRelea
         throw new Error('Arquivos XML de ícone adaptativo em mipmap-anydpi-v26 ausentes.');
       }
 
-      return `Configuração Android/Capacitor validada: appId=com.jobs.app, minSdk=24, targetSdk=36, version=1.0.0 (1), Manifesto e ícones adaptativos íntegros.`;
+      return `Configuração Android/Capacitor validada: appId=com.jobs.app, minSdk=24, targetSdk=36, version=1.0.0 (1), signingConfigs via env, permissões WebRTC e ícones adaptativos íntegros.`;
+    }
+  );
+
+  await runCase(
+    'GATE-AND-02',
+    'ETAPA_5_ANDROID_CAPACITOR',
+    'Auditoria de CI/CD em 2 Jobs (web-pipeline e android-validation), Captura de Logs por Etapa e Wrapper Gradle',
+    () => {
+      const workflowPath = path.join(rootDir, '.github/workflows/android-release-gate.yml');
+      const brokenDenoPath = path.join(rootDir, '.github/workflows/deno.yml');
+      const brokenGradlePublishPath = path.join(rootDir, '.github/workflows/gradle-publish.yml');
+      const gradlewPath = path.join(rootDir, 'android/gradlew');
+
+      if (!fs.existsSync(workflowPath)) {
+        throw new Error('Workflow .github/workflows/android-release-gate.yml ausente.');
+      }
+      if (fs.existsSync(brokenDenoPath) || fs.existsSync(brokenGradlePublishPath)) {
+        throw new Error('Templates de workflow incompatíveis (deno.yml / gradle-publish.yml) ainda presentes.');
+      }
+      if (!fs.existsSync(gradlewPath)) {
+        throw new Error('Wrapper android/gradlew ausente.');
+      }
+
+      const workflowContent = fs.readFileSync(workflowPath, 'utf-8');
+      if (
+        !workflowContent.includes('web-pipeline:') ||
+        !workflowContent.includes('android-validation:') ||
+        !workflowContent.includes('needs: web-pipeline') ||
+        !workflowContent.includes('npm ci') ||
+        !workflowContent.includes('npm run test') ||
+        !workflowContent.includes('npm run typecheck') ||
+        !workflowContent.includes('npm run build') ||
+        !workflowContent.includes('npm run build:android') ||
+        !workflowContent.includes('./android/gradlew -p android assembleDebug') ||
+        !workflowContent.includes('actions/upload-artifact@v4')
+      ) {
+        throw new Error('Workflow android-release-gate.yml não contém os jobs separados web-pipeline/android-validation e captura de logs.');
+      }
+
+      return `Workflow CI android-release-gate.yml validado: jobs web-pipeline (npm ci -> test -> typecheck -> build + logs) e android-validation (cap sync -> config check -> assembleDebug + artifacts).`;
     }
   );
 

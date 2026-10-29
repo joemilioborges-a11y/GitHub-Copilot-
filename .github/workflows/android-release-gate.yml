@@ -1,0 +1,177 @@
+name: JOBS — Release Gate & Android Build
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+      - 'tdd/**'
+      - 'ci/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  web-pipeline:
+    name: "Fase 2 — Pipeline Web (npm ci, Tests, Typecheck, Web Build)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Prepare CI log directory
+        run: |
+          mkdir -p ci-logs
+          echo "JOBS Web Pipeline — Status por Etapa" > ci-logs/step-status.txt
+
+      - name: "1. Install dependencies (reproducible via package-lock.json)"
+        run: |
+          set -o pipefail
+          if npm ci 2>&1 | tee ci-logs/01-npm-ci.log; then
+            echo "PASS: 01-npm-ci" >> ci-logs/step-status.txt
+          else
+            echo "FAIL: 01-npm-ci (Instalação reproduzível de dependências)" >> ci-logs/step-status.txt
+            echo "::error title=Falha na Etapa 1::npm ci falhou. Consulte ci-logs/01-npm-ci.log"
+            exit 1
+          fi
+
+      - name: "2. Run full automated verification suite"
+        run: |
+          set -o pipefail
+          if npm run test 2>&1 | tee ci-logs/02-npm-test.log; then
+            echo "PASS: 02-npm-test" >> ci-logs/step-status.txt
+          else
+            echo "FAIL: 02-npm-test (Suíte de testes de verificação)" >> ci-logs/step-status.txt
+            echo "::error title=Falha na Etapa 2::npm run test falhou. Consulte ci-logs/02-npm-test.log"
+            exit 1
+          fi
+
+      - name: "3. TypeScript typecheck"
+        run: |
+          set -o pipefail
+          if npm run typecheck 2>&1 | tee ci-logs/03-typecheck.log; then
+            echo "PASS: 03-typecheck" >> ci-logs/step-status.txt
+          else
+            echo "FAIL: 03-typecheck (Verificação TypeScript tsc --noEmit)" >> ci-logs/step-status.txt
+            echo "::error title=Falha na Etapa 3::npm run typecheck falhou. Consulte ci-logs/03-typecheck.log"
+            exit 1
+          fi
+
+      - name: "4. Build Web (Vite production bundle)"
+        run: |
+          set -o pipefail
+          if npm run build 2>&1 | tee ci-logs/04-web-build.log; then
+            echo "PASS: 04-web-build" >> ci-logs/step-status.txt
+          else
+            echo "FAIL: 04-web-build (Build Web Vite)" >> ci-logs/step-status.txt
+            echo "::error title=Falha na Etapa 4::npm run build falhou. Consulte ci-logs/04-web-build.log"
+            exit 1
+          fi
+
+      - name: "5. Publish Web Pipeline Summary"
+        if: always()
+        run: |
+          echo "## JOBS — Resumo do Pipeline Web" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          cat ci-logs/step-status.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Upload Web Pipeline Logs"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobs-web-pipeline-logs
+          path: ci-logs/
+          retention-days: 14
+
+  android-validation:
+    name: "Fase 3 — Validação Android (Capacitor Sync, Pacote com.jobs.app & Gradlew)"
+    needs: web-pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Android CI log directory
+        run: |
+          mkdir -p ci-logs-android
+          echo "JOBS Android Validation — Status por Etapa" > ci-logs-android/android-step-status.txt
+
+      - name: "1. Install dependencies & Build Web + Sync Capacitor Android"
+        run: |
+          set -o pipefail
+          if (npm ci && npm run build:android) 2>&1 | tee ci-logs-android/05-cap-sync-android.log; then
+            echo "PASS: 05-cap-sync-android" >> ci-logs-android/android-step-status.txt
+          else
+            echo "FAIL: 05-cap-sync-android (Build Web + npx cap sync android)" >> ci-logs-android/android-step-status.txt
+            echo "::error title=Falha no Sync Capacitor::npm run build:android falhou. Consulte ci-logs-android/05-cap-sync-android.log"
+            exit 1
+          fi
+
+      - name: "2. Validate package com.jobs.app, Manifest, SDK 24/36 & Signing Config"
+        run: |
+          set -o pipefail
+          {
+            grep -q "appId: 'com.jobs.app'" capacitor.config.ts
+            grep -q 'applicationId "com.jobs.app"' android/app/build.gradle
+            grep -q 'minSdkVersion = 24' android/variables.gradle
+            grep -q 'targetSdkVersion = 36' android/variables.gradle
+            grep -q 'android.permission.CAMERA' android/app/src/main/AndroidManifest.xml
+            grep -q 'android.permission.RECORD_AUDIO' android/app/src/main/AndroidManifest.xml
+            echo "Pacote com.jobs.app, SDK 24/36 e manifesto verificados com sucesso."
+          } 2>&1 | tee ci-logs-android/06-android-config-check.log
+          echo "PASS: 06-android-config-check" >> ci-logs-android/android-step-status.txt
+
+      - name: "3. Ensure gradlew is executable & assemble Android Debug APK"
+        run: |
+          set -o pipefail
+          chmod +x ./android/gradlew
+          if ./android/gradlew -p android assembleDebug --stacktrace 2>&1 | tee ci-logs-android/07-gradle-assemble-debug.log; then
+            echo "PASS: 07-gradle-assemble-debug" >> ci-logs-android/android-step-status.txt
+          else
+            echo "FAIL: 07-gradle-assemble-debug (Compilação Gradle assembleDebug)" >> ci-logs-android/android-step-status.txt
+            echo "::error title=Falha na Compilação Android::assembleDebug falhou. Consulte ci-logs-android/07-gradle-assemble-debug.log"
+            exit 1
+          fi
+
+      - name: "4. Publish Android Validation Summary"
+        if: always()
+        run: |
+          echo "## JOBS — Resumo da Validação Android" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          cat ci-logs-android/android-step-status.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Upload Android Validation Logs & Debug APK"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobs-android-validation-artifacts
+          path: |
+            ci-logs-android/
+            android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
