@@ -33,6 +33,7 @@ import {
   VideoOff,
   Camera,
   ShieldAlert,
+  ShieldCheck,
   Check,
   AlertTriangle,
   Clock,
@@ -105,6 +106,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     sendComment,
     sendLike,
     sendGift,
+    voteChallenge,
     refreshLives,
     clearError,
   } = useLiveStreamView({
@@ -128,6 +130,8 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   const [selectedBattleTarget, setSelectedBattleTarget] = useState<string | null>(null);
   const [isLikeAnimating, setIsLikeAnimating] = useState(false);
   const [commentFeedback, setCommentFeedback] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [voteFeedback, setVoteFeedback] = useState<string | null>(null);
+  const [isVotingChallenge, setIsVotingChallenge] = useState(false);
 
   // Denúncia
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -266,6 +270,26 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
     setIsLikeAnimating(true);
     setTimeout(() => setIsLikeAnimating(false), 300);
     sendLike();
+  };
+
+  // Votação consensual em desafios interativos
+  const hasUserVotedInChallenge = useMemo(() => {
+    if (!activeSession?.challengeState) return false;
+    return liveStreamService.hasParticipantVoted(activeSession.id, 'current_user');
+  }, [activeSession]);
+
+  const handleVoteChallenge = async (optionId: string) => {
+    if (!activeSession || isVotingChallenge) return;
+    setIsVotingChallenge(true);
+    const res = await voteChallenge(optionId);
+    setIsVotingChallenge(false);
+    if (res.success) {
+      setVoteFeedback('Seu voto consensual foi registrado com sucesso!');
+      setTimeout(() => setVoteFeedback(null), 3500);
+    } else if (res.error) {
+      setVoteFeedback(res.error);
+      setTimeout(() => setVoteFeedback(null), 4000);
+    }
   };
 
   // Enviar Presente Virtual Atômico (reutiliza fluxo do ledgerService com 70/30)
@@ -722,6 +746,75 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
                   >
                     Pedir para Subir no Palco
                   </button>
+                </div>
+              )}
+
+              {/* OVERLAY: Challenge Voting Widget in Challenge mode */}
+              {activeSession.format === 'challenge' && activeSession.challengeState && (
+                <div className="absolute bottom-18 left-3 right-3 z-30 p-3 rounded-2xl bg-black/85 backdrop-blur-md border border-amber-500/30 text-white shadow-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Target className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-bold text-amber-300">
+                        {activeSession.challengeState.title}
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-mono tabular-nums font-semibold text-amber-300">
+                      {hasUserVotedInChallenge ? 'Voto registrado ✓' : 'Votação aberta'}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-300 leading-tight">
+                    {activeSession.challengeState.description}
+                  </p>
+
+                  {/* Options */}
+                  {activeSession.challengeState.optionsForVote && activeSession.challengeState.optionsForVote.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                      {activeSession.challengeState.optionsForVote.map((opt) => {
+                        const totalVotes = activeSession.challengeState?.optionsForVote?.reduce((sum, o) => sum + o.votes, 0) || 1;
+                        const pct = Math.round((opt.votes / Math.max(1, totalVotes)) * 100);
+                        const isVotedChoice = activeSession.challengeState?.voters?.['current_user'] === opt.id;
+
+                        return (
+                          <button
+                            key={opt.id}
+                            disabled={hasUserVotedInChallenge || isVotingChallenge}
+                            onClick={() => handleVoteChallenge(opt.id)}
+                            className={`relative overflow-hidden min-h-[44px] px-3 py-2 rounded-xl text-left transition-all border text-xs cursor-pointer flex items-center ${
+                              isVotedChoice
+                                ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-bold'
+                                : hasUserVotedInChallenge
+                                ? 'bg-slate-900/60 border-slate-700 text-slate-400 cursor-not-allowed'
+                                : 'bg-slate-900/80 hover:bg-slate-800 border-white/10 hover:border-amber-400 text-white'
+                            }`}
+                          >
+                            <div
+                              className="absolute inset-y-0 left-0 bg-amber-500/20 pointer-events-none transition-all duration-300"
+                              style={{ width: `${pct}%` }}
+                            />
+                            <div className="relative z-10 w-full flex items-center justify-between">
+                              <span className="truncate pr-2">{opt.label}</span>
+                              <span className="font-mono tabular-nums text-[10px] text-amber-300 font-bold shrink-0">
+                                {opt.votes} ({pct}%)
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {voteFeedback && (
+                    <div className="text-[11px] text-amber-300 bg-amber-950/60 border border-amber-500/40 px-2 py-1 rounded-lg text-center font-medium animate-in fade-in">
+                      {voteFeedback}
+                    </div>
+                  )}
+
+                  <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span>Votação voluntária e consensual da audiência. Não há apostas nem retorno financeiro.</span>
+                  </div>
                 </div>
               )}
 

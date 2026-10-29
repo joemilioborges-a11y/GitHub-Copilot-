@@ -210,11 +210,12 @@ class AuthService {
     rawPassword: string
   ): Promise<{ success: boolean; account?: RegisteredAccount; error?: string }> {
     await this.initializeIfNeeded();
-    const cleanId = identifier.trim().toLowerCase().replace('@', '');
+    const rawIdentifier = identifier.trim().toLowerCase();
+    const cleanUsernameId = rawIdentifier.replace(/^@/, '');
     const accounts = await this.getAccounts();
 
     const account = accounts.find(
-      (a) => a.email.toLowerCase() === cleanId || a.username.toLowerCase() === cleanId
+      (a) => a.email.toLowerCase() === rawIdentifier || a.username.toLowerCase() === cleanUsernameId
     );
 
     if (!account) {

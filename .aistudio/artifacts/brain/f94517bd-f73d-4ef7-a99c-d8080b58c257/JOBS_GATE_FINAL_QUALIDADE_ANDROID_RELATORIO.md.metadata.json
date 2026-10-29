@@ -1,0 +1,5 @@
+{
+  "summary":  "Relatório técnico completo do Gate Final de Qualidade, Testes, Segurança, Integridade Financeira (70/30) e Preparação Android (Google Play Store) do JOBS, cobrindo o inventário real das 18 telas, execução de 376 testes automatizados (100% aprovados), correção de bug real de login por e-mail em authService.ts, build web + sincronização Capacitor Android e diagnóstico de prontidão para publicação.",
+  "updatedAt":  "2026-10-29T19:30:00.204138852Z",
+  "userFacing":  true
+}

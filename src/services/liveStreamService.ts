@@ -174,6 +174,9 @@ export interface LiveChallengeState {
   rewardDescription: string;
   status: 'active' | 'completed' | 'failed';
   optionsForVote?: { id: string; label: string; votes: number }[];
+  voters?: Record<string, string>;
+  votedParticipantIds?: string[];
+  votedAtTimestamps?: Record<string, string>;
 }
 
 export interface PerformanceRewardRule {
@@ -955,16 +958,130 @@ class LiveStreamService {
   // DESAFIOS & VOTAÇÃO
   // ==========================================================================
 
-  public async voteOnChallenge(sessionId: string, optionId: string): Promise<void> {
-    const sessions = this.getLiveSessions();
-    const session = sessions.find((s) => s.id === sessionId);
-    if (!session || !session.challengeState?.optionsForVote) return;
+  /**
+   * Registra voto consensual em opção de desafio coletivo de Live.
+   * 
+   * Requisitos de integridade:
+   * 1. Identidade do participante obrigatória (não vazia).
+   * 2. Sessão de transmissão ativa e transmitindo.
+   * 3. Desafio presente e com status ativo.
+   * 4. Opção de voto existente no catálogo do desafio.
+   * 5. Prevenção estrita contra votos duplicados pela mesma identidade.
+   * 6. Persistência atômica da contagem e do registro rastreável do votante.
+   * 
+   * Limitação documentada:
+   * A persistência em localStorage atua como proteção e integridade no cliente (anti-duplicação local).
+   * Em produção com infraestrutura dedicada, a validação autoritativa deve ser complementada
+   * por verificação assinada no servidor de backend/Firestore.
+   */
+  public async voteOnChallenge(
+    sessionId: string,
+    optionId: string,
+    participantId: string
+  ): Promise<{
+    success: boolean;
+    session: LiveSessionModel;
+    votedOption: { id: string; label: string; votes: number };
+    participantId: string;
+  }> {
+    return this.enqueue(async () => {
+      // 1. Identidade do participante obrigatória
+      if (!participantId || typeof participantId !== 'string' || participantId.trim() === '') {
+        throw new Error('Identidade do participante é obrigatória para registrar o voto no desafio.');
+      }
+      const trimmedParticipantId = participantId.trim();
 
-    const opt = session.challengeState.optionsForVote.find((o) => o.id === optionId);
-    if (opt) {
+      // 2. Transmissão existente
+      const sessions = this.getLiveSessions();
+      const session = sessions.find((s) => s.id === sessionId);
+      if (!session) {
+        throw new Error(`Sessão de transmissão não encontrada: ${sessionId}`);
+      }
+
+      // 3. Transmissão ativa
+      if (session.status !== 'active' || !session.isBroadcasting) {
+        throw new Error('Transmissão encerrada ou inativa. Votação de desafios indisponível.');
+      }
+
+      // 4. Desafio existente e ativo
+      if (!session.challengeState) {
+        throw new Error('Esta transmissão não possui um desafio interativo configurado.');
+      }
+
+      if (session.challengeState.status !== 'active') {
+        throw new Error('Desafio inativo ou já finalizado. Votos não são mais aceitos.');
+      }
+
+      // 5. Opções configuradas e opção existente
+      if (!session.challengeState.optionsForVote || session.challengeState.optionsForVote.length === 0) {
+        throw new Error('Não há opções de votação configuradas para este desafio.');
+      }
+
+      const opt = session.challengeState.optionsForVote.find((o) => o.id === optionId);
+      if (!opt) {
+        throw new Error(`Opção de votação inexistente no desafio: ${optionId}`);
+      }
+
+      // 6. Prevenção contra voto duplicado
+      const votersMap = session.challengeState.voters || {};
+      const votedList = session.challengeState.votedParticipantIds || [];
+      const hasVoted = Boolean(votersMap[trimmedParticipantId]) || votedList.includes(trimmedParticipantId);
+
+      if (hasVoted) {
+        throw new Error(
+          `Voto duplicado rejeitado. O participante "${trimmedParticipantId}" já registrou seu voto neste desafio.`
+        );
+      }
+
+      // 7. Modificação e persistência atômica
       opt.votes += 1;
+
+      // Se métrica for contagem de votos da audiência, incrementa progresso
+      if (session.challengeState.targetMetric === 'audience_votes') {
+        session.challengeState.currentValue += 1;
+        if (session.challengeState.currentValue >= session.challengeState.targetValue) {
+          session.challengeState.status = 'completed';
+        }
+      }
+
+      // Registro rastreável do votante
+      if (!session.challengeState.voters) {
+        session.challengeState.voters = {};
+      }
+      session.challengeState.voters[trimmedParticipantId] = optionId;
+
+      if (!session.challengeState.votedParticipantIds) {
+        session.challengeState.votedParticipantIds = [];
+      }
+      session.challengeState.votedParticipantIds.push(trimmedParticipantId);
+
+      if (!session.challengeState.votedAtTimestamps) {
+        session.challengeState.votedAtTimestamps = {};
+      }
+      session.challengeState.votedAtTimestamps[trimmedParticipantId] = new Date().toISOString();
+
       this.saveLiveSessions(sessions);
-    }
+
+      return {
+        success: true,
+        session,
+        votedOption: opt,
+        participantId: trimmedParticipantId,
+      };
+    });
+  }
+
+  /**
+   * Consulta se um participante já registrou voto no desafio da sessão
+   */
+  public hasParticipantVoted(sessionId: string, participantId: string): boolean {
+    if (!participantId || typeof participantId !== 'string') return false;
+    const session = this.getSessionById(sessionId);
+    if (!session || !session.challengeState) return false;
+    const trimmed = participantId.trim();
+    const voters = session.challengeState.voters || {};
+    const votedList = session.challengeState.votedParticipantIds || [];
+    return Boolean(voters[trimmed]) || votedList.includes(trimmed);
   }
 
   // ==========================================================================

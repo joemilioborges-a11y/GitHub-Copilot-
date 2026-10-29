@@ -1,6 +1,6 @@
 {
-  "summary":  "Plano de implementação para o refinamento do Ranking Financeiro de Criadores no Painel Central Administrativo, adicionando popovers analíticos acessíveis (origem, fórmula, período, moeda BRL vs Créditos, status e limitações), gráficos compactos de barras de decomposição contábil (Parcela Criador 70%, Taxa JOBS 30%, Taxas PSP e Estornos) sincronizados com o período selecionado, comparação temporal com o período anterior equivalente e suíte completa de 12 testes automatizados.",
-  "updatedAt":  "2026-10-29T01:58:45.626705432Z",
+  "summary":  "Plano do Gate Final de Qualidade, Testes, Segurança e Preparação Android para Google Play Store na branch release/gate-final-android-qa, incluindo assinatura de release via variáveis de ambiente, permissões WebRTC no AndroidManifest, workflow CI Node/Capacitor/Android e suíte de validação das 18 telas.",
+  "updatedAt":  "2026-10-29T19:37:37.386049111Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -1,156 +1,61 @@
-# JOBS — Refinamento do Ranking Financeiro de Criadores
+# Plano de Implementação — JOBS: Gate Final de Qualidade, Testes e Publicação Android
 
-Refinamento da interface do **Ranking Financeiro de Criadores** integrado ao Painel Central Administrativo, adicionando popovers analíticos acessíveis para rastreabilidade contábil de cada indicador, gráficos de barras comparativos de decomposição financeira (Parcela do Criador 70%, Comissão JOBS 30%, Taxas e Estornos) sincronizados ao período ativo e validação automatizada de integridade financeira.
+## 1. Objetivo e Contexto Arquitetural
 
----
+Executar e consolidar o **Gate Final de Qualidade, Testes, Segurança e Preparação Android** do **JOBS** na branch dedicada `release/gate-final-android-qa` (mantendo `main` intacta em `da72758`), preservando integralmente o `ledgerService`, a regra de divisão financeira **70/30** (`CREATOR_NET_SHARE_RATIO = 0.70`, `PLATFORM_FEE_RATIO = 0.30`) e todas as 18 telas existentes.
 
-## Decisões Confirmadas e Diretrizes Críticas
-
-> [!IMPORTANT]
-> As decisões abaixo foram confirmadas na etapa de alinhamento e regem a arquitetura funcional e visual desta entrega:
-
-- **Decisão Confirmada 1 — Modelo Visual de Barras Comparativas**: Adotar **Decomposição Contábil** na célula de ganhos de cada criador, exibindo visualmente a proporção entre **Ganhos Brutos**, **Parcela Líquida do Criador (70%)**, **Taxa da Plataforma JOBS (30%)** e **Estornos/Ajustes**, acompanhada de comparativo direto com o período anterior equivalente quando suportado pelo histórico.
-- **Decisão Confirmada 2 — Interação dos Tooltips Analíticos**: Implementar **Popover Acessível** acionado por clique, toque, foco de teclado (`Tab` / `Enter` / `Space`) e fechamento via tecla `Esc` ou clique externo, garantindo leitura completa em dispositivos móveis sem depender apenas de `hover`.
-- **Decisão Confirmada 3 — Sincronização Temporal**: Sincronizar automaticamente o cálculo das barras comparativas e dos metadados analíticos com o filtro de período ativo do painel (`Hoje`, `7 Dias`, `14 Dias`, `30 Dias`, `Acumulado`), exibindo indicação explícita quando o histórico de comparação for parcial ou indisponível (especialmente em Produção Real desconectada).
-
-> [!WARNING]
-> **Invariantes Contábeis Inegociáveis**:
-> - O componente visual consumirá exclusivamente dados apurados pelos serviços financeiros autorizados, sem recalcular regras contábeis de forma autônoma na camada de apresentação e sem jamais mutar o livro-razão (`financialLedger`) durante a renderização.
-> - Créditos virtuais (`💎`) permanecem estritamente segregados de moeda fiduciária (`BRL`), sem soma ou mistura de unidades.
+O escopo abrange:
+- **Inventário completo e verificável das 18 telas reais** (`01_landing` a `18_reports_blocks`) e modais críticos (`LiveStreamView`, `WalletModal`, `ScreenSwitcherModal`).
+- **Correção de regressão reproduzida no login por e-mail** (`src/utils/authService.ts`) e suíte automatizada de verificação do Gate Final (`src/utils/finalReleaseGateVerificationTests.ts` integrada ao `scripts/runVerificationTests.ts`).
+- **Adequação Android para Google Play Store**:
+  - Configuração de `signingConfigs.release` em `android/app/build.gradle` lendo credenciais exclusivamente de variáveis de ambiente (`JOBS_UPLOAD_STORE_FILE`, `JOBS_UPLOAD_STORE_PASSWORD`, `JOBS_UPLOAD_KEY_ALIAS`, `JOBS_UPLOAD_KEY_PASSWORD`) sem segredos hardcoded, com fallback seguro quando ausentes.
+  - Permissão de execução (`chmod +x`) no wrapper `android/gradlew`.
+  - Declaração das permissões de hardware e mídia (`CAMERA`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`) e `<uses-feature>` opcionais (`android.hardware.camera`, `android.hardware.microphone`) em `android/app/src/main/AndroidManifest.xml` para suportar Lives e videochamadas WebRTC.
+- **Adequação de CI/CD**:
+  - Substituição dos templates incompatíveis (`.github/workflows/deno.yml` e `.github/workflows/gradle-publish.yml`) por um workflow unificado `.github/workflows/android-release-gate.yml` que executa `npm ci`, `npm run typecheck`, `npm run test`, `npm run build:android` e `./android/gradlew assembleDebug` com JDK 21 e Android SDK.
+- **Auditoria e Relatório Final de Evidências** (`JOBS_GATE_FINAL_QUALIDADE_ANDROID_RELATORIO.md`) com todos os comandos executados, códigos de saída, bloqueios reais de ambiente (ausência de JDK/Android SDK local no container) e checklist da Google Play Console.
 
 ---
 
-## 1. Visão Geral e Conceito Central
+## 2. Alterações Propostas por Arquivo
 
-- **O Que Faz**: Eleva a transparência contábil e a capacidade de inspeção executiva da tabela de classificação financeira de criadores, permitindo ao administrador auditar instantaneamente de onde vem cada cifra, qual fórmula foi aplicada e como a receita bruta gerada por cada criador se decompõe entre repasse líquido (70%), retenção da plataforma (30%), taxas operacionais e estornos.
-- **Público-Alvo / Persona**: Administradores financeiros, auditores internos e operadores de conformidade da plataforma JOBS autenticados no Painel Central Administrativo.
-- **Valor Principal**: Reduz o tempo de conciliação e auditoria por criador, elimina ambiguidades entre valores brutos, retidos em carência (`D+14`), elegíveis para saque e estornados, e garante rastreabilidade direta até os lançamentos do livro-razão sem sobrecarregar a leitura tabular.
+### 2.1. Autenticação e Suíte Automatizada do Gate Final (Já aplicadas e validadas na branch `release/gate-final-android-qa`)
+- **`src/utils/authService.ts`**:
+  - Correção da normalização do identificador no método `login()` para preservar o `@` ao comparar com `a.email.toLowerCase()` e remover apenas `@` inicial (`replace(/^@/, '')`) ao comparar com `a.username`.
+- **`src/utils/finalReleaseGateVerificationTests.ts`** & **`scripts/runVerificationTests.ts`**:
+  - Suíte automatizada cobrindo:
+    - `GATE-18S-01`: Inventário das 18 telas em `ALL_18_SCREENS` e validação de categorias e IDs únicos.
+    - `GATE-FUNC-01..04`: Fluxos funcionais de ponta a ponta (cadastro/login por e-mail e username, sessões de Lives e votação segura com bloqueio de duplicidade, proteção de mídias exclusivas com URL assinada, e isolamento financeiro 70/30 + bloqueio de auto-desbloqueio).
+    - `GATE-SEC-01..03`: Segurança de rotas Express (`src/serverApp.ts`) contra IDOR (`403`), webhook Pix com assinatura HMAC inválida (`401`), e payout em modo simulação bloqueado (`503` fail-closed).
+    - `GATE-AND-01..02`: Verificação da configuração Capacitor/Android (`capacitor.config.ts`, `android/app/build.gradle`, `AndroidManifest.xml` e `variables.gradle`).
 
----
+### 2.2. Configuração de Build e Permissões Android
+- **`android/app/build.gradle`**:
+  - Adicionar bloco `signingConfigs { release { ... } }` alimentado apenas por variáveis de ambiente (`System.getenv("JOBS_UPLOAD_STORE_FILE")`, etc.), aplicando `signingConfig signingConfigs.release` em `buildTypes.release` somente quando o keystore de upload estiver configurado no ambiente.
+- **`android/app/src/main/AndroidManifest.xml`**:
+  - Declarar `<uses-permission android:name="android.permission.CAMERA" />`, `<uses-permission android:name="android.permission.RECORD_AUDIO" />` e `<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />`, além de `<uses-feature android:name="android.hardware.camera" android:required="false" />` e `<uses-feature android:name="android.hardware.microphone" android:required="false" />`.
+- **`android/gradlew`**:
+  - Garantir bit executável (`chmod +x android/gradlew`, modo `100755` no Git).
 
-## 2. Experiência do Usuário e Design Visual
+### 2.3. Pipeline de CI/CD (`.github/workflows/`)
+- **Remover** `.github/workflows/deno.yml` e `.github/workflows/gradle-publish.yml` (templates incompatíveis com Node/Vite/Capacitor).
+- **Criar** `.github/workflows/android-release-gate.yml`:
+  - Configura Node.js 22 + JDK 21 (`temurin`) + Android SDK.
+  - Executa `npm ci`, `npm run typecheck`, `npm run test`, `npm run build:android` e `./android/gradlew -p android assembleDebug`.
 
-### Fluxos de Interação do Usuário
-
-1. **Inspeção de Indicadores via Popover Analítico**:
-   - No cabeçalho de cada coluna financeira do ranking (Ganhos Brutos, Taxa JOBS 30%, Taxas PSP, Estornos, Ganhos Líquidos 70%, Pendentes D+14, Elegível para Saque, Já Pagos) e nos indicadores de resumo, um botão informativo acessível (`aria-expanded`, `aria-controls`, área de toque mínima calibrada) abre um popover estruturado.
-   - O popover exibe 8 dimensões auditáveis: **Nome do Indicador**, **Origem Oficial dos Dados**, **Regra de Cálculo (Fórmula)**, **Período e Fuso Horário (`America/Sao_Paulo`)**, **Moeda (`BRL` ou `CREDITS` segregados)**, **Status Financeiro**, **Horário da Última Atualização Verificável** e **Limitações / Ressalvas Contábeis**.
-   - Caso um indicador não possua fonte ou histórico verificável (por exemplo, em ambiente de Produção Real sem adquirente ativa ou métrica sem cobertura histórica), o popover exibe aviso explícito de **Informação Indisponível / Histórico Incompleto**, sem inventar explicações.
-
-2. **Leitura dos Gráficos de Barras Comparativos por Criador**:
-   - Na célula de ganhos de cada linha do ranking, abaixo ou ao lado dos numerais tabulares, é renderizado um **Gráfico de Barras Comparativo Compacto** com duas visões integradas:
-     1. **Barras de Decomposição Contábil do Período Ativo**: Três barras horizontais proporcionais lado a lado ou empilhadas com identificação clara e legenda acessível:
-        - **Parcela Líquida Criador (70%)** em verde esmeralda (`#10B981`).
-        - **Comissão JOBS (30%) + Taxas** em rosa/âmbar institucional (`#F43F5E` / `#F59E0B`).
-        - **Estornos e Ajustes Compensatórios** em vermelho alerta (`#EF4444`), destacando visualmente quando houver dedução pro-rata.
-     2. **Barra de Comparação com Período Anterior Equivalente**: Indicador compacto comparando o ganho líquido no período selecionado (`7d`, `14d`, `30d`) contra a janela anterior equivalente, com variação percentual (`+18,5%`, `-14,2%` ou `Sem histórico anterior`).
-   - Cada barra possui foco próprio por teclado e interação por toque/clique, abrindo o detalhamento com valores exatos formatados em `pt-BR`, período de referência, moeda (`BRL`) e quantidade de transações elegíveis.
-
-3. **Responsividade e Preservação dos Controles Existentes**:
-   - Em telas desktop (`1440px`), o mini gráfico integra-se harmoniosamente à célula de ganhos sem alargar excessivamente a tabela.
-   - Em telas compactas/móveis, exibe uma barra resumida com botão de toque rápido para expandir os detalhes comparativos.
-   - Todos os controles existentes — busca por nome, `@handle` ou `ID`, 9 modos de ordenação, filtros de status/conteúdo/pagamento, anonimização LGPD, paginação segura e dossiê individual — permanecem 100% preservados.
-
-### Identidade Visual e Tema
-
-- **Direção Estética**: *Enterprise Financial Ledger Grid* — superfícies escuras de camada única (`#0F0F18` e `#121222`) com bordas estruturais sutis de `1px` (`border-slate-800`), zero uso de pílulas decorativas para metadados estáticos (metadados separados por pontos tipográficos `·`), e hierarquia numérica estrita.
-- **Tipografia e Alinhamento Numérico**:
-  - Todos os valores monetários, percentuais, contadores de vendas e timestamps utilizam obrigatoriamente `font-mono` e `tabular-nums` (`font-variant-numeric: tabular-nums`), garantindo alinhamento vertical perfeito de casas decimais entre as linhas.
-- **Semântica de Cores e Acessibilidade**:
-  - Além das cores semânticas (Esmeralda para líquido do criador, Rosa/Âmbar para retenção JOBS, Vermelho para estornos, Ciano para saldo elegível), todas as barras e indicadores incluem prefixos textuais e rótulos acessíveis (`70% Criador`, `30% JOBS`, `Estorno`) para nunca depender exclusivamente de cor.
+### 2.4. Relatório Completo de Auditoria e Evidências
+- **`/.aistudio/artifacts/brain/f94517bd-f73d-4ef7-a99c-d8080b58c257/JOBS_GATE_FINAL_QUALIDADE_ANDROID_RELATORIO.md`**:
+  - Atualizar o relatório consolidado das Etapas 1 a 6 com o status atualizado de `build.gradle`, `AndroidManifest.xml`, `gradlew`, workflow de CI e resultados dos testes automatizados.
 
 ---
 
-## 3. Decisões de Produto e Trade-Offs
+## 3. Plano de Verificação
 
-- **Decisão 1: Agregação Determinística Centralizada na Camada de Serviço vs. Cálculo Inline no Componente**
-  - *Abordagem Escolhida*: Centralizar o catálogo de metadados analíticos dos indicadores e o cálculo das séries comparativas por criador diretamente no serviço financeiro (`monetizationService` em conjunto com `financialLedger`), entregando objetos tipados prontos para renderização e memoizados via `useMemo`.
-  - *Por Quê*: Garante que a interface nunca recalcule a regra `70/30` de forma independente ou divergente do livro-razão, elimina consultas repetidas por linha durante re-renderizações e permite testar toda a lógica matemática e de rastreabilidade de maneira determinística na suíte automatizada.
-  - *Alternativas Consideradas*: Calcular proporções e períodos anteriores dentro do JSX de cada linha da tabela foi descartado por violar a regra de integridade financeira e degradar o desempenho da tabela paginada.
-
-- **Decisão 2: Popover Interativo Nativo com Controle de Foco vs. Atributo `title` Nativo do Navegador**
-  - *Abordagem Escolhida*: Construir um componente reutilizável de Popover Analítico (`AnalyticalIndicatorPopover`) com suporte a mouse, toque mobile, navegação por teclado (`Tab`, `Enter`, `Escape`) e atributos ARIA completos.
-  - *Por Quê*: O atributo `title` nativo não funciona em telas sensíveis ao toque (mobile/tablet), não pode ser focado via teclado e não permite estruturar os 8 campos obrigatórios de rastreabilidade contábil.
-
----
-
-## 4. Arquitetura Técnica e Estratégia de Dados
-
-### Diagrama de Arquitetura e Fluxo de Dados
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                   CAMADA DE SERVIÇOS E LIVRO-RAZÃO IMUTÁVEL                │
-│                                                                            │
-│  ┌──────────────────────────────┐      ┌────────────────────────────────┐  │
-│  │       financialLedger        │      │      monetizationService       │  │
-│  │ (Somente Leitura na Visão)   │─────▶│ • getCreatorRankings()         │  │
-│  │ • Partidas Dobradas BRL/CRED │      │ • getIndicatorAuditMetadata()  │  │
-│  │ • Isolamento Sandbox / Prod  │      │ • getCreatorComparativeBars()  │  │
-│  └──────────────────────────────┘      └───────────────┬────────────────┘  │
-└────────────────────────────────────────────────────────┼───────────────────┘
-                                                         │
-                                      Dados Tipados & Memoizados (useMemo)
-                                                         │
-                                                         ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│                PAINEL CENTRAL ADMINISTRATIVO (Visualização)                │
-│                                                                            │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │            CreatorEarningsRankingView & PlatformFinancialExecutive   │  │
-│  │                                                                      │  │
-│  │  ┌─────────────────────────────────┐  ┌───────────────────────────┐  │  │
-│  │  │   AnalyticalIndicatorPopover    │  │ CreatorComparativeBarCell │  │  │
-│  │  │ • Origem, Fórmula e Período     │  │ • Barra 70% Criador (BRL) │  │  │
-│  │  │ • Moeda (BRL vs Créditos)       │  │ • Barra 30% JOBS + Taxas  │  │  │
-│  │  │ • Status e Limitações Explícitas│  │ • Barra Estornos / Ajustes│  │  │
-│  │  │ • Suporte Clique/Toque/Teclado  │  │ • Comparativo Período Ant.│  │  │
-│  │  └─────────────────────────────────┘  └───────────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Modelo de Dados e Contratos de Rastreabilidade
-
-1. **Metadados Analíticos de Indicadores (`IndicatorAnalyticalMetadata`)**:
-   - `indicatorKey`: Identificador único da métrica (`gross_sales`, `platform_commission_30`, `psp_fees`, `refunds_adjustments`, `net_creator_70`, `pending_d14`, `eligible_withdrawal`, `paid_settled`, `virtual_credits_volume`).
-   - `indicatorName`: Nome claro e descritivo do indicador.
-   - `dataSource`: Serviço e conta contábil oficial (ex.: `financialLedger · Conta CREATOR_AVAILABLE_BRL`) ou `Indisponível` quando não verificável.
-   - `calculationFormula`: Regra matemática real aplicada pelo sistema (ex.: `Bruto Elegível × 70% − Taxas Atribuídas − Estornos Pro-Rata`).
-   - `periodLabel` & `timezone`: Intervalo selecionado (`Hoje`, `Últimos 7 dias`, `Últimos 14 dias`, `Últimos 30 dias`, `Acumulado`) no fuso `America/Sao_Paulo (BRT)`.
-   - `currency`: `'BRL'` ou `'CREDITS'` (nunca misturados).
-   - `financialStatus`: `'liquidado' | 'pendente_custodia' | 'estornado' | 'elegivel_saque' | 'indisponivel'`.
-   - `lastVerifiedUpdate`: Timestamp verificável da última apuração.
-   - `limitations`: Lista explícita de ressalvas (ex.: ambiente de simulação, carência `D+14` ativa, ausência de registros no período ou falta de homologação em produção).
-   - `isSourceAvailable`: Booleano que determina se a origem é comprovada ou se deve exibir o estado de informação indisponível.
-
-2. **Série Comparativa por Criador (`CreatorEarningsComparativeSeries`)**:
-   - `creatorId`: Identificador do criador.
-   - `currentPeriodLabel` & `previousPeriodLabel`: Rótulos das janelas comparadas (ex.: `Últimos 7 dias` vs `7 dias anteriores`).
-   - `currency`: `'BRL'`.
-   - `hasHistoricalData`: Indica se há registros confirmados para sustentar a comparação.
-   - `bars`: Lista de barras estruturadas contendo:
-     - `key`: `'creator_net_70' | 'platform_commission_30' | 'refunds_adjustments' | 'previous_period_net'`.
-     - `label`: Rótulo legível e acessível.
-     - `amountBrl`: Valor exato em Reais (`number`).
-     - `proportionPct`: Proporção visual normalizada (`0` a `100%`) em relação ao volume bruto do período, tratando valores zero e negativos com segurança visual.
-     - `periodReference`: Intervalo temporal exato da barra.
-     - `definition`: Descrição contábil exibida no tooltip individual da barra.
-   - `periodDeltaPct`: Variação percentual calculada entre o período atual e o anterior equivalente (`null` quando o histórico anterior for ausente ou zero).
-   - `creditsMovedCount`: Volume de créditos virtuais de origem mantido em campo informativo separado, sem somar ao valor em `BRL`.
-
-### Mapeamento de Interações e Suíte de Testes (12 Verificações Obrigatórias)
-
-A suíte automatizada validará todas as 12 exigências técnicas e contábeis antes da aprovação:
-1. **Tooltip com origem e fórmula corretas** para todos os indicadores financeiros da tabela.
-2. **Tratamento de indicador com origem indisponível**, garantindo exibição de mensagem explícita sem dados inventados.
-3. **Comparação de períodos equivalentes** (`7d` atual vs `7d` anterior, `14d` vs `14d`, `30d` vs `30d`).
-4. **Tratamento seguro de valores zero, variações negativas e históricos ausentes** (como em Produção Real desconectada).
-5. **Contabilização correta de estornos, pendências (`D+14`) e bloqueio de transações duplicadas** por idempotência.
-6. **Separação rigorosa entre `BRL` e créditos virtuais (`CREDITS`)**, comprovando ausência de soma cruzada.
-7. **Aplicação exclusiva da regra `70/30` em transações elegíveis**, respeitando taxas e deduções configuradas.
-8. **Preservação integral de busca (nome, `@handle`, `ID`), filtros, 9 modos de ordenação e paginação**.
-9. **Acessibilidade de interação** (suporte a abertura/fechamento via clique, toque, foco de teclado e tecla `Escape` com atributos ARIA).
-10. **Responsividade e integridade de layout** nas células da tabela (versão compacta e detalhamento sob demanda).
-11. **Autorização e menor privilégio**, garantindo ausência de exposição de segredos, queries SQL, chaves PIX completas ou PII não autorizada nos tooltips.
-12. **Imutabilidade absoluta do livro-razão (`financialLedger`)**, comprovando que consultar rankings, abrir tooltips e renderizar gráficos de barras mantém o número de entradas, hashes SHA-256 e saldos 100% inalterados.
+1. **Verificação Estática e Tipagem TypeScript**:
+   - Executar `npm run typecheck` (`tsc --noEmit`) e `lint_applet` -> esperado **Exit Code 0**.
+2. **Suíte Completa de Testes Automatizados**:
+   - Executar `npm run test` (`tsx scripts/runVerificationTests.ts`) -> esperado **100% de aprovação** incluindo os testes de regressão de `AndroidManifest.xml`, `build.gradle` e login por e-mail.
+3. **Build Web + Sincronização Capacitor Android**:
+   - Executar `npm run build:android` (`vite build && cap sync android`) e `compile_applet` -> esperado **Exit Code 0**.
+4. **Verificação do Wrapper Gradle e Diagnóstico Transparente do Ambiente**:
+   - Executar `./android/gradlew -p android assembleDebug` diretamente (validando permissão de execução `100755`) e registrar o resultado real do container Linux (bloqueio por ausência de JDK/Android SDK local documentado com transparência).

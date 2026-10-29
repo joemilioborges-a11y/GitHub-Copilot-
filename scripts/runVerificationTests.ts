@@ -531,6 +531,24 @@ async function main() {
     }
   }
 
+  console.log('\n========================================================================');
+  console.log('JOBS — GATE FINAL DE QUALIDADE, 18 TELAS, SEGURANÇA E PREPARAÇÃO ANDROID');
+  console.log('========================================================================\n');
+
+  const { runFinalReleaseGateVerificationSuite } = await import(
+    '../src/utils/finalReleaseGateVerificationTests'
+  );
+  const finalReleaseGateSummary = await runFinalReleaseGateVerificationSuite();
+
+  for (const t of finalReleaseGateSummary.results) {
+    const icon = t.passed ? '✅ [PASS]' : '❌ [FAIL]';
+    console.log(`${icon} ${t.id} [${t.stage}]: ${t.name} (${t.durationMs}ms)`);
+    console.log(`    EVIDÊNCIA: ${t.evidence}`);
+    if (!t.passed && t.error) {
+      console.log(`    ERRO: ${t.error}`);
+    }
+  }
+
   const grandTotal =
     summary.totalTests +
     withdrawalSummary.total +
@@ -560,7 +578,8 @@ async function main() {
     progMediaSecSummary.total +
     talentSimSummary.total +
     finHistSummary.totalTests +
-    rankingRefinementSummary.totalTests;
+    rankingRefinementSummary.totalTests +
+    finalReleaseGateSummary.total;
   const grandPassed =
     summary.passedCount +
     withdrawalSummary.passed +
@@ -590,7 +609,8 @@ async function main() {
     progMediaSecSummary.passed +
     talentSimSummary.passed +
     finHistSummary.passedTests +
-    rankingRefinementSummary.passedTests;
+    rankingRefinementSummary.passedTests +
+    finalReleaseGateSummary.passed;
   const grandFailed =
     summary.failedCount +
     withdrawalSummary.failed +
@@ -620,7 +640,8 @@ async function main() {
     progMediaSecSummary.failed +
     talentSimSummary.failed +
     finHistSummary.failedTests +
-    rankingRefinementSummary.failedTests;
+    rankingRefinementSummary.failedTests +
+    finalReleaseGateSummary.failed;
 
   console.log('\n========================================================================');
   console.log('RESUMO CONSOLIDADO DA PLATAFORMA JOBS:');
@@ -645,7 +666,8 @@ async function main() {
       prodReadinessSummary.durationMs +
       progMediaSecSummary.durationMs +
       talentSimSummary.durationMs +
-      finHistSummary.durationMs
+      finHistSummary.durationMs +
+      finalReleaseGateSummary.durationMs
     }ms`
   );
   console.log('========================================================================\n');

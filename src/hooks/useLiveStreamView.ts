@@ -86,6 +86,9 @@ export interface UseLiveStreamViewReturn extends LiveStreamViewState {
     gift: VirtualGiftItem,
     targetBattleCreatorId?: string
   ) => Promise<{ success: boolean; error?: string }>;
+  voteChallenge: (
+    optionId: string
+  ) => Promise<{ success: boolean; error?: string }>;
   refreshLives: () => void;
   clearError: () => void;
   retryConnection: () => void;
@@ -450,6 +453,33 @@ export class LiveStreamViewStateManager {
     }
   };
 
+  public voteChallenge = async (
+    optionId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!this.state.selectedLiveId || !this.state.currentSession) {
+      return { success: false, error: 'Nenhuma transmissão selecionada.' };
+    }
+
+    const participantId = this.options.currentUserId || 'current_user';
+    try {
+      const res = await liveStreamService.voteOnChallenge(
+        this.state.selectedLiveId,
+        optionId,
+        participantId
+      );
+      this.setState({
+        currentSession: res.session,
+        sessions: this.state.sessions.map((s) => (s.id === res.session.id ? res.session : s)),
+        error: null,
+      });
+      return { success: true };
+    } catch (err: any) {
+      const msg = err?.message || 'Falha ao registrar voto consensual no desafio.';
+      this.setState({ error: msg });
+      return { success: false, error: msg };
+    }
+  };
+
   public refreshLives = (): void => {
     try {
       const list = liveStreamService.getLiveSessions();
@@ -552,6 +582,10 @@ export function useLiveStreamView(
     (gift: VirtualGiftItem, target?: string) => managerRef.current!.sendGift(gift, target),
     []
   );
+  const voteChallenge = useCallback(
+    (optionId: string) => managerRef.current!.voteChallenge(optionId),
+    []
+  );
   const refreshLives = useCallback(
     () => managerRef.current!.refreshLives(),
     []
@@ -572,6 +606,7 @@ export function useLiveStreamView(
     sendComment,
     sendLike,
     sendGift,
+    voteChallenge,
     refreshLives,
     clearError,
     retryConnection,

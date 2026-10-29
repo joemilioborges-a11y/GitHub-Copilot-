@@ -257,11 +257,412 @@ export async function runLiveAndAuditVerificationSuite(): Promise<VerificationSu
       ];
       liveStreamService.saveLiveSessions(sessions);
 
-      await liveStreamService.voteOnChallenge(challengeLive.id, 'opt_b');
+      await (liveStreamService as any).voteOnChallenge(challengeLive.id, 'opt_b', 'viewer_chal_user_42');
       const updated = liveStreamService.getLiveSessions().find((s) => s.id === challengeLive.id)!;
       const optB = updated.challengeState!.optionsForVote!.find((o) => o.id === 'opt_b')!;
       if (optB.votes !== 21) {
         throw new Error(`Votos esperados 21, encontrado ${optB.votes}`);
+      }
+    }
+  );
+
+  // --- TDD: VOTAÇÃO SEGURA E CONSENSUAL EM DESAFIOS DE LIVES ---
+  await runTest(
+    'TC-CHAL-VOTE-01',
+    'CHALLENGES',
+    'Identidade do participante é obrigatória (rejeita ausente, vazia ou somente espaços)',
+    async () => {
+      const live = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Identidade Obrigatória',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_01',
+        hostCreatorName: 'Criador TDD 1',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessions = liveStreamService.getLiveSessions();
+      const target = sessions.find((s) => s.id === live.id)!;
+      target.challengeState!.optionsForVote = [
+        { id: 'opt_x', label: 'Opção X (Música Acústica)', votes: 5 },
+        { id: 'opt_y', label: 'Opção Y (Dança Criativa)', votes: 12 },
+      ];
+      liveStreamService.saveLiveSessions(sessions);
+
+      // Tentativa 1: string vazia
+      let rejectedEmpty = false;
+      try {
+        await (liveStreamService as any).voteOnChallenge(live.id, 'opt_x', '');
+      } catch (err: any) {
+        if (err.message && err.message.toLowerCase().includes('identidade')) {
+          rejectedEmpty = true;
+        }
+      }
+      if (!rejectedEmpty) {
+        throw new Error('Falha TDD: Voto com identidade vazia deveria ser rejeitado com erro explícito de identidade.');
+      }
+
+      // Tentativa 2: espaços em branco
+      let rejectedWhitespace = false;
+      try {
+        await (liveStreamService as any).voteOnChallenge(live.id, 'opt_x', '    ');
+      } catch (err: any) {
+        if (err.message && err.message.toLowerCase().includes('identidade')) {
+          rejectedWhitespace = true;
+        }
+      }
+      if (!rejectedWhitespace) {
+        throw new Error('Falha TDD: Voto com espaços em branco deveria ser rejeitado.');
+      }
+
+      // Tentativa 3: participante ausente / undefined
+      let rejectedUndefined = false;
+      try {
+        await (liveStreamService as any).voteOnChallenge(live.id, 'opt_x', undefined);
+      } catch (err: any) {
+        if (err.message && err.message.toLowerCase().includes('identidade')) {
+          rejectedUndefined = true;
+        }
+      }
+      if (!rejectedUndefined) {
+        throw new Error('Falha TDD: Voto sem participante (undefined) deveria ser rejeitado.');
+      }
+
+      // Validar que contagens permanecem estritamente intactas
+      const fresh = liveStreamService.getSessionById(live.id)!;
+      const optX = fresh.challengeState!.optionsForVote!.find((o) => o.id === 'opt_x')!;
+      if (optX.votes !== 5) {
+        throw new Error(`Contagem foi indevidamente alterada: esperado 5, encontrado ${optX.votes}`);
+      }
+    }
+  );
+
+  await runTest(
+    'TC-CHAL-VOTE-02',
+    'CHALLENGES',
+    'Primeiro voto válido incrementa a opção escolhida',
+    async () => {
+      const live = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Primeiro Voto Válido',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_02',
+        hostCreatorName: 'Criador TDD 2',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessions = liveStreamService.getLiveSessions();
+      const target = sessions.find((s) => s.id === live.id)!;
+      target.challengeState!.optionsForVote = [
+        { id: 'opt_alpha', label: 'Opção Alpha', votes: 15 },
+        { id: 'opt_beta', label: 'Opção Beta', votes: 30 },
+      ];
+      liveStreamService.saveLiveSessions(sessions);
+
+      await (liveStreamService as any).voteOnChallenge(live.id, 'opt_beta', 'voter_first_timer_01');
+
+      const fresh = liveStreamService.getSessionById(live.id)!;
+      const optBeta = fresh.challengeState!.optionsForVote!.find((o) => o.id === 'opt_beta')!;
+      const optAlpha = fresh.challengeState!.optionsForVote!.find((o) => o.id === 'opt_alpha')!;
+
+      if (optBeta.votes !== 31) {
+        throw new Error(`Opção Beta deveria ter 31 votos, encontrado: ${optBeta.votes}`);
+      }
+      if (optAlpha.votes !== 15) {
+        throw new Error(`Opção Alpha não votada deveria permanecer com 15 votos, encontrado: ${optAlpha.votes}`);
+      }
+    }
+  );
+
+  await runTest(
+    'TC-CHAL-VOTE-03',
+    'CHALLENGES',
+    'Identidade do votante é persistida em registro rastreável do desafio',
+    async () => {
+      const live = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Persistência de Identidade',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_03',
+        hostCreatorName: 'Criador TDD 3',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessions = liveStreamService.getLiveSessions();
+      const target = sessions.find((s) => s.id === live.id)!;
+      target.challengeState!.optionsForVote = [
+        { id: 'opt_1', label: 'Coreografia Disco', votes: 0 },
+        { id: 'opt_2', label: 'Coreografia Samba', votes: 0 },
+      ];
+      liveStreamService.saveLiveSessions(sessions);
+
+      await (liveStreamService as any).voteOnChallenge(live.id, 'opt_1', 'user_audited_voter_99');
+
+      const fresh = liveStreamService.getSessionById(live.id)!;
+      const voters = fresh.challengeState!.voters;
+      const votedList = fresh.challengeState!.votedParticipantIds;
+
+      if (!voters || voters['user_audited_voter_99'] !== 'opt_1') {
+        throw new Error('Identidade do votante não foi persistida corretamente no mapa de voters.');
+      }
+      if (!votedList || !votedList.includes('user_audited_voter_99')) {
+        throw new Error('Identidade do votante não foi incluída na lista de votedParticipantIds.');
+      }
+    }
+  );
+
+  await runTest(
+    'TC-CHAL-VOTE-04',
+    'CHALLENGES',
+    'Segundo voto da mesma identidade é rejeitado com erro explícito de duplicidade',
+    async () => {
+      const live = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Rejeição de Voto Duplicado',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_04',
+        hostCreatorName: 'Criador TDD 4',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessions = liveStreamService.getLiveSessions();
+      const target = sessions.find((s) => s.id === live.id)!;
+      target.challengeState!.optionsForVote = [
+        { id: 'opt_a', label: 'Opção A', votes: 10 },
+        { id: 'opt_b', label: 'Opção B', votes: 20 },
+      ];
+      liveStreamService.saveLiveSessions(sessions);
+
+      // Primeiro voto válido
+      await (liveStreamService as any).voteOnChallenge(live.id, 'opt_a', 'viewer_single_vote_only');
+
+      // Segundo voto da mesma identidade
+      let rejectedDuplicate = false;
+      let duplicateErrorMessage = '';
+      try {
+        await (liveStreamService as any).voteOnChallenge(live.id, 'opt_b', 'viewer_single_vote_only');
+      } catch (err: any) {
+        rejectedDuplicate = true;
+        duplicateErrorMessage = err.message || '';
+      }
+
+      if (!rejectedDuplicate) {
+        throw new Error('Falha TDD: Segundo voto da mesma identidade deveria ter sido rejeitado.');
+      }
+
+      if (!duplicateErrorMessage.toLowerCase().includes('duplicado') && !duplicateErrorMessage.toLowerCase().includes('já')) {
+        throw new Error(`Mensagem de erro de duplicidade inadequada: "${duplicateErrorMessage}"`);
+      }
+    }
+  );
+
+  await runTest(
+    'TC-CHAL-VOTE-05',
+    'CHALLENGES',
+    'Tentativa de voto duplicado não modifica nenhuma contagem de opções',
+    async () => {
+      const live = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Contagem Intacta em Duplicidade',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_05',
+        hostCreatorName: 'Criador TDD 5',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessions = liveStreamService.getLiveSessions();
+      const target = sessions.find((s) => s.id === live.id)!;
+      target.challengeState!.optionsForVote = [
+        { id: 'opt_1', label: 'Opção 1', votes: 40 },
+        { id: 'opt_2', label: 'Opção 2', votes: 60 },
+      ];
+      liveStreamService.saveLiveSessions(sessions);
+
+      // Voto 1
+      await (liveStreamService as any).voteOnChallenge(live.id, 'opt_1', 'user_idempotent_tester');
+
+      // Voto 2 (duplicado)
+      try {
+        await (liveStreamService as any).voteOnChallenge(live.id, 'opt_2', 'user_idempotent_tester');
+      } catch {
+        // esperado falhar
+      }
+
+      // Validar contagens
+      const fresh = liveStreamService.getSessionById(live.id)!;
+      const opt1 = fresh.challengeState!.optionsForVote!.find((o) => o.id === 'opt_1')!;
+      const opt2 = fresh.challengeState!.optionsForVote!.find((o) => o.id === 'opt_2')!;
+
+      if (opt1.votes !== 41) {
+        throw new Error(`Opção 1 deveria ter exatamente 41 votos, encontrado: ${opt1.votes}`);
+      }
+      if (opt2.votes !== 60) {
+        throw new Error(`Opção 2 NÃO deveria ter sido incrementada por tentativa de voto duplicado. Esperado 60, encontrado: ${opt2.votes}`);
+      }
+    }
+  );
+
+  await runTest(
+    'TC-CHAL-VOTE-06',
+    'CHALLENGES',
+    'Opção inexistente é rejeitada sem alterar contagens e sem bloquear o participante',
+    async () => {
+      const live = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Opção Inexistente',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_06',
+        hostCreatorName: 'Criador TDD 6',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessions = liveStreamService.getLiveSessions();
+      const target = sessions.find((s) => s.id === live.id)!;
+      target.challengeState!.optionsForVote = [
+        { id: 'opt_valid_1', label: 'Opção Válida 1', votes: 100 },
+        { id: 'opt_valid_2', label: 'Opção Válida 2', votes: 200 },
+      ];
+      liveStreamService.saveLiveSessions(sessions);
+
+      let rejectedNonexistent = false;
+      try {
+        await (liveStreamService as any).voteOnChallenge(live.id, 'opt_inexistente_9999', 'user_typo_voter');
+      } catch (err: any) {
+        rejectedNonexistent = true;
+        if (!err.message.toLowerCase().includes('inexistente')) {
+          throw new Error(`Mensagem deve indicar opção inexistente: "${err.message}"`);
+        }
+      }
+
+      if (!rejectedNonexistent) {
+        throw new Error('Falha TDD: Voto em opção inexistente deveria ter sido rejeitado.');
+      }
+
+      // Validar que o usuário não foi penalizado/bloqueado e ainda pode votar na opção válida
+      await (liveStreamService as any).voteOnChallenge(live.id, 'opt_valid_1', 'user_typo_voter');
+
+      const fresh = liveStreamService.getSessionById(live.id)!;
+      const opt1 = fresh.challengeState!.optionsForVote!.find((o) => o.id === 'opt_valid_1')!;
+      const opt2 = fresh.challengeState!.optionsForVote!.find((o) => o.id === 'opt_valid_2')!;
+
+      if (opt1.votes !== 101) {
+        throw new Error(`Opção 1 deveria ter sido votada normalmente com 101 votos, encontrado: ${opt1.votes}`);
+      }
+      if (opt2.votes !== 200) {
+        throw new Error(`Opção 2 deveria permanecer com 200 votos, encontrado: ${opt2.votes}`);
+      }
+    }
+  );
+
+  await runTest(
+    'TC-CHAL-VOTE-07',
+    'CHALLENGES',
+    'Transmissão encerrada ou desafio inativo não aceita votos',
+    async () => {
+      // Cenário A: Transmissão encerrada
+      const liveA = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Transmissão Encerrada',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_07a',
+        hostCreatorName: 'Criador TDD 7A',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessionsA = liveStreamService.getLiveSessions();
+      const targetA = sessionsA.find((s) => s.id === liveA.id)!;
+      targetA.challengeState!.optionsForVote = [
+        { id: 'opt_closed', label: 'Opção Encerrada', votes: 50 },
+      ];
+      liveStreamService.saveLiveSessions(sessionsA);
+
+      // Encerra a live
+      await liveStreamService.endLiveSession(liveA.id);
+
+      let rejectedEnded = false;
+      try {
+        await (liveStreamService as any).voteOnChallenge(liveA.id, 'opt_closed', 'user_late_voter');
+      } catch (err: any) {
+        rejectedEnded = true;
+        if (!err.message.toLowerCase().includes('encerrada') && !err.message.toLowerCase().includes('inativa')) {
+          throw new Error(`Mensagem deve indicar transmissão inativa/encerrada: "${err.message}"`);
+        }
+      }
+      if (!rejectedEnded) {
+        throw new Error('Falha TDD: Voto em live encerrada deveria ter sido rejeitado.');
+      }
+
+      // Cenário B: Desafio inativo/concluído
+      const liveB = await liveStreamService.startNewLiveSession({
+        format: 'challenge',
+        title: 'Desafio TDD Desafio Inativo',
+        description: 'Votação consensual da audiência',
+        category: 'desafio_coletivo',
+        hostCreatorId: 'creator_chal_tdd_07b',
+        hostCreatorName: 'Criador TDD 7B',
+        hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+        gender: 'homem',
+        sexualOrientation: 'hetero',
+        priceCreditsToUnlock: 0,
+      });
+
+      const sessionsB = liveStreamService.getLiveSessions();
+      const targetB = sessionsB.find((s) => s.id === liveB.id)!;
+      targetB.challengeState!.optionsForVote = [
+        { id: 'opt_finished', label: 'Opção Finalizada', votes: 88 },
+      ];
+      targetB.challengeState!.status = 'completed'; // desafio já concluído
+      liveStreamService.saveLiveSessions(sessionsB);
+
+      let rejectedInactiveChallenge = false;
+      try {
+        await (liveStreamService as any).voteOnChallenge(liveB.id, 'opt_finished', 'user_challenge_closed');
+      } catch (err: any) {
+        rejectedInactiveChallenge = true;
+        if (!err.message.toLowerCase().includes('inativo') && !err.message.toLowerCase().includes('finalizado')) {
+          throw new Error(`Mensagem deve indicar desafio inativo/finalizado: "${err.message}"`);
+        }
+      }
+      if (!rejectedInactiveChallenge) {
+        throw new Error('Falha TDD: Voto em desafio com status diferente de active deveria ter sido rejeitado.');
+      }
+
+      // Validar contagens intactas
+      const freshA = liveStreamService.getSessionById(liveA.id)!;
+      if (freshA.challengeState!.optionsForVote![0].votes !== 50) {
+        throw new Error('Contagem da Live A foi alterada indevidamente.');
+      }
+      const freshB = liveStreamService.getSessionById(liveB.id)!;
+      if (freshB.challengeState!.optionsForVote![0].votes !== 88) {
+        throw new Error('Contagem da Live B foi alterada indevidamente.');
       }
     }
   );
