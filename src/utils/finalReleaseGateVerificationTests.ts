@@ -729,22 +729,34 @@ export async function runFinalReleaseGateVerificationSuite(): Promise<FinalRelea
       }
 
       const workflowContent = fs.readFileSync(workflowPath, 'utf-8');
-      if (
-        !workflowContent.includes('web-pipeline:') ||
-        !workflowContent.includes('android-validation:') ||
-        !workflowContent.includes('needs: web-pipeline') ||
-        !workflowContent.includes('npm ci') ||
-        !workflowContent.includes('npm run test') ||
-        !workflowContent.includes('npm run typecheck') ||
-        !workflowContent.includes('npm run build') ||
-        !workflowContent.includes('npm run build:android') ||
-        !workflowContent.includes('./android/gradlew -p android assembleDebug') ||
-        !workflowContent.includes('actions/upload-artifact@v4')
-      ) {
-        throw new Error('Workflow android-release-gate.yml não contém os jobs separados web-pipeline/android-validation e captura de logs.');
+      const requiredContracts = [
+        'web-pipeline:',
+        'android-validation:',
+        'needs: web-pipeline',
+        'uses: oven-sh/setup-bun@v2',
+        "bun-version: '1.4.4'",
+        'bun install --frozen-lockfile',
+        'bun run test',
+        'bun run typecheck',
+        'bun run build',
+        'bun run build:android',
+        'ci-logs/01-bun-install.log',
+        'ci-logs/02-bun-test.log',
+        'ci-logs-android/05-cap-sync-android.log',
+        'ci-logs-android/07-gradle-assemble-debug.log',
+        './android/gradlew -p android assembleDebug',
+        'actions/upload-artifact@v4',
+      ];
+      const missingContracts = requiredContracts.filter((contract) => !workflowContent.includes(contract));
+      if (missingContracts.length > 0) {
+        throw new Error(
+          `Workflow android-release-gate.yml não atende aos contratos obrigatórios (jobs separados web-pipeline/android-validation e captura de logs). Ausentes: ${missingContracts
+            .map((contract) => `"${contract}"`)
+            .join(', ')}.`
+        );
       }
 
-      return `Workflow CI android-release-gate.yml validado: jobs web-pipeline (npm ci -> test -> typecheck -> build + logs) e android-validation (cap sync -> config check -> assembleDebug + artifacts).`;
+      return `Workflow CI android-release-gate.yml validado: Bun 1.4.4 (setup-bun@v2), jobs web-pipeline (bun install --frozen-lockfile -> test -> typecheck -> build + logs) e android-validation (needs web-pipeline; build:android/cap sync -> config check -> assembleDebug + logs e artifacts).`;
     }
   );
 
