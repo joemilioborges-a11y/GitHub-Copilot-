@@ -7,6 +7,7 @@ on:
       - 'release/**'
       - 'tdd/**'
       - 'ci/**'
+      - 'fix/release-gate-android'
   pull_request:
     branches:
       - main
