@@ -623,6 +623,41 @@ class LiveStreamService {
   // OPERAÇÕES DE TRANSMISSÃO (CRIAR, INICIAR, ENCERRAR)
   // ==========================================================================
 
+  /**
+   * Sufixo aleatório criptograficamente seguro (crypto.randomUUID ou getRandomValues,
+   * disponíveis em navegadores e no WebView do Capacitor). O contador monotônico
+   * garante distinção mesmo no fallback sem Web Crypto.
+   */
+  private idFallbackCounter = 0;
+
+  private randomIdSuffix(): string {
+    const webCrypto = (globalThis as any).crypto;
+    if (webCrypto && typeof webCrypto.randomUUID === 'function') {
+      return webCrypto.randomUUID().replace(/-/g, '').slice(0, 12);
+    }
+    if (webCrypto && typeof webCrypto.getRandomValues === 'function') {
+      const bytes = webCrypto.getRandomValues(new Uint8Array(6)) as Uint8Array;
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    }
+    this.idFallbackCounter += 1;
+    return `${this.idFallbackCounter.toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  /**
+   * Gera `live_<formato>_<timestamp>_<sufixo>` garantindo unicidade contra as sessões persistidas.
+   * Preserva o prefixo `live_<formato>_` usado por ledger e filtros.
+   */
+  private generateUniqueSessionId(format: LiveFormat, existing: LiveSessionModel[]): string {
+    const MAX_ATTEMPTS = 5;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const candidate = `live_${format}_${Date.now()}_${this.randomIdSuffix()}`;
+      if (!existing.some((s) => s.id === candidate)) {
+        return candidate;
+      }
+    }
+    throw new Error(`Não foi possível gerar um identificador único para a sessão de live após ${MAX_ATTEMPTS} tentativas.`);
+  }
+
   public async startNewLiveSession(params: {
     format: LiveFormat;
     title: string;
@@ -640,12 +675,12 @@ class LiveStreamService {
   }): Promise<LiveSessionModel> {
     return this.enqueue(async () => {
       const sessions = this.getLiveSessions();
-      const newId = `live_${params.format}_${Date.now()}`;
+      const newId = this.generateUniqueSessionId(params.format, sessions);
 
       let battleState: LiveBattleState | undefined;
       if (params.format === 'battle' && params.opponentCreatorId) {
         battleState = {
-          battleId: `bat_${Date.now()}`,
+          battleId: `bat_${Date.now()}_${this.randomIdSuffix()}`,
           creator1: {
             id: params.hostCreatorId,
             name: params.hostCreatorName,
@@ -670,7 +705,7 @@ class LiveStreamService {
       let challengeState: LiveChallengeState | undefined;
       if (params.format === 'challenge') {
         challengeState = {
-          challengeId: `chal_${Date.now()}`,
+          challengeId: `chal_${Date.now()}_${this.randomIdSuffix()}`,
           title: params.title,
           description: params.description,
           targetMetric: 'credits_gifts',
