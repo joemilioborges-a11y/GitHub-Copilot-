@@ -668,6 +668,163 @@ export async function runLiveAndAuditVerificationSuite(): Promise<VerificationSu
   );
 
   // =========================================================================
+  // 4.1 UNICIDADE DE IDENTIFICADORES DE LIVE (COLISÃO NO MESMO MILISSEGUNDO)
+  // =========================================================================
+  const withFixedClock = async (fn: () => Promise<void>) => {
+    const realNow = Date.now;
+    Date.now = () => 1_800_000_000_000;
+    try {
+      await fn();
+    } finally {
+      Date.now = realNow;
+    }
+  };
+
+  const baseLiveParams = (format: 'individual' | 'battle' | 'interactive_stage' | 'challenge', tag: string) => ({
+    format,
+    title: `Live ID ${tag}`,
+    description: 'Teste de unicidade de identificadores',
+    category: 'desafio_coletivo' as any,
+    hostCreatorId: `creator_id_${tag}`,
+    hostCreatorName: `Criador ${tag}`,
+    hostCreatorAvatar: '/src/assets/images/profile_gabriel_1791856836359.jpg',
+    gender: 'homem' as const,
+    sexualOrientation: 'hetero' as const,
+    priceCreditsToUnlock: 0,
+    ...(format === 'battle'
+      ? { opponentCreatorId: `opp_id_${tag}`, opponentCreatorName: `Oponente ${tag}` }
+      : {}),
+  });
+
+  await runTest(
+    'TC-LIVE-ID-01',
+    'LIVES_LIFECYCLE',
+    'Lives do mesmo formato criadas com Date.now() fixo recebem IDs distintos e permanecem isoladas',
+    async () => {
+      await withFixedClock(async () => {
+        const lives: Awaited<ReturnType<typeof liveStreamService.startNewLiveSession>>[] = [];
+        for (const tag of ['a', 'b', 'c', 'd']) {
+          lives.push(await liveStreamService.startNewLiveSession(baseLiveParams('challenge', `fixo_${tag}`)));
+        }
+
+        const ids = lives.map((l) => l.id);
+        if (new Set(ids).size !== ids.length) {
+          throw new Error(`IDs de sessão colidiram sob o mesmo timestamp: ${ids.join(', ')}`);
+        }
+        if (!ids.every((id) => id.startsWith('live_challenge_'))) {
+          throw new Error(`Prefixo live_<formato>_ não preservado: ${ids.join(', ')}`);
+        }
+
+        const chalIds = lives.map((l) => l.challengeState!.challengeId);
+        if (new Set(chalIds).size !== chalIds.length) {
+          throw new Error('challengeId colidiu entre lives criadas no mesmo instante.');
+        }
+
+        // getSessionById devolve a sessão correta e sem duplicidade na lista persistida
+        const persisted = liveStreamService.getLiveSessions();
+        lives.forEach((live, i) => {
+          if (persisted.filter((s) => s.id === live.id).length !== 1) {
+            throw new Error(`ID ${live.id} duplicado ou ausente na persistência.`);
+          }
+          const found = liveStreamService.getSessionById(live.id);
+          if (!found || found.hostCreatorId !== `creator_id_fixo_${['a', 'b', 'c', 'd'][i]}`) {
+            throw new Error(`getSessionById retornou a sessão errada para ${live.id}.`);
+          }
+        });
+
+        // Votação na Live A não altera a Live B
+        const sessions = liveStreamService.getLiveSessions();
+        sessions.find((s) => s.id === lives[0].id)!.challengeState!.optionsForVote = [{ id: 'opt_x', label: 'X', votes: 10 }];
+        sessions.find((s) => s.id === lives[1].id)!.challengeState!.optionsForVote = [{ id: 'opt_x', label: 'X', votes: 20 }];
+        liveStreamService.saveLiveSessions(sessions);
+
+        await (liveStreamService as any).voteOnChallenge(lives[0].id, 'opt_x', 'voter_id_iso_01');
+
+        const votesA = liveStreamService.getSessionById(lives[0].id)!.challengeState!.optionsForVote![0].votes;
+        const votesB = liveStreamService.getSessionById(lives[1].id)!.challengeState!.optionsForVote![0].votes;
+        if (votesA !== 11) throw new Error(`Live A deveria ter 11 votos, encontrado: ${votesA}`);
+        if (votesB !== 20) throw new Error(`Live B deveria permanecer com 20 votos, encontrado: ${votesB}`);
+      });
+    }
+  );
+
+  await runTest(
+    'TC-LIVE-ID-02',
+    'BATTLES',
+    'Batalhas no mesmo instante têm sessão e battleId distintos; todos os formatos e seeds continuam acessíveis',
+    async () => {
+      await withFixedClock(async () => {
+        const b1 = await liveStreamService.startNewLiveSession(baseLiveParams('battle', 'bat1'));
+        const b2 = await liveStreamService.startNewLiveSession(baseLiveParams('battle', 'bat2'));
+        if (b1.id === b2.id) throw new Error('IDs de sessão de batalha colidiram.');
+        if (b1.battleState!.battleId === b2.battleState!.battleId) throw new Error('battleId colidiu.');
+
+        for (const format of ['individual', 'interactive_stage', 'challenge'] as const) {
+          const live = await liveStreamService.startNewLiveSession(baseLiveParams(format, `fmt_${format}`));
+          if (!live.id.startsWith(`live_${format}_`)) throw new Error(`Formato ${format} com ID inválido: ${live.id}`);
+          if (liveStreamService.getSessionById(live.id)?.id !== live.id) throw new Error(`Sessão ${format} inacessível.`);
+        }
+      });
+
+      for (const seedId of ['live_battle_isabella_camila', 'live_stage_larissa', 'live_challenge_gabriel']) {
+        if (!liveStreamService.getSessionById(seedId)) {
+          throw new Error(`Sessão seed/histórica ${seedId} não está mais acessível.`);
+        }
+      }
+    }
+  );
+
+  await runTest(
+    'TC-LIVE-ID-03',
+    'LIVES_LIFECYCLE',
+    'Colisão simulada de ID é detectada e resolvida sem sobrescrever sessão existente; esgotamento gera erro controlado',
+    async () => {
+      const svc = liveStreamService as any;
+      const realSuffix = svc.randomIdSuffix;
+      try {
+        await withFixedClock(async () => {
+          // Todas as chamadas devolvem o mesmo sufixo, exceto a 3ª em diante (força 1 colisão)
+          let calls = 0;
+          svc.randomIdSuffix = () => {
+            calls += 1;
+            return calls <= 2 ? 'colisao_fixa' : `unico_${calls}`;
+          };
+
+          const first = await liveStreamService.startNewLiveSession(baseLiveParams('individual', 'col1'));
+          const callsAfterFirst = calls;
+          const second = await liveStreamService.startNewLiveSession(baseLiveParams('individual', 'col2'));
+
+          if (first.id === second.id) throw new Error('Colisão não foi resolvida: IDs iguais.');
+          if (calls <= callsAfterFirst + 1) throw new Error('Nova tentativa de geração não foi realizada após a colisão.');
+          if (liveStreamService.getSessionById(first.id)!.hostCreatorId !== 'creator_id_col1') {
+            throw new Error('Sessão existente foi sobrescrita durante a colisão.');
+          }
+          if (liveStreamService.getSessionById(second.id)!.hostCreatorId !== 'creator_id_col2') {
+            throw new Error('Segunda sessão não foi persistida corretamente.');
+          }
+
+          // Esgotamento: sufixo sempre igual => erro controlado e nenhuma sessão alterada
+          svc.randomIdSuffix = () => 'sempre_igual';
+          await liveStreamService.startNewLiveSession(baseLiveParams('individual', 'col3'));
+          const before = JSON.stringify(liveStreamService.getLiveSessions());
+          let controlled = false;
+          try {
+            await liveStreamService.startNewLiveSession(baseLiveParams('individual', 'col4'));
+          } catch (err: any) {
+            controlled = err.message.includes('identificador único');
+          }
+          if (!controlled) throw new Error('Esgotamento de tentativas deveria gerar erro controlado.');
+          if (JSON.stringify(liveStreamService.getLiveSessions()) !== before) {
+            throw new Error('Persistência foi alterada após falha de geração de ID.');
+          }
+        });
+      } finally {
+        svc.randomIdSuffix = realSuffix;
+      }
+    }
+  );
+
+  // =========================================================================
   // 5. CATÁLOGO DE PRESENTES, IDEMPOTÊNCIA E DIVISÃO 70/30 NO LEDGER
   // =========================================================================
   await runTest(
